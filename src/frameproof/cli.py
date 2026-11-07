@@ -103,8 +103,14 @@ def cmd_verify(a) -> None:
         if v.meta["hyperframes"].get("status") == "failed":
             v.decision = "BLOCK"
             v.reasons.append("hyperframes lint/render failed")
+    if a.render_video:
+        from .probe import preview_mp4, render_mp4
+
+        v.meta["render"] = ({**render_mp4(Path(a.html).parent, out / "video.mp4"), "kind": "hyperframes"}
+                            if a.render_video == "hyperframes" else preview_mp4(a.html, out / "video.mp4"))
     write_report(v, out)
     print((out / "verdict.md").read_text())
+    print(f"open: {out / 'report.html'}")
     sys.exit(0 if v.decision == "ACCEPT" else 1)
 
 
@@ -118,9 +124,9 @@ def cmd_bench(a) -> None:
         b = brief_mod.load(d / "brief.json")[0]
         checks = compile_mod.load(d / "checks.json")
         cases.append((b, d / "index.html", checks))
-    out = bench(cases, use_judge=a.judge, seed=a.seed)
+    out = bench(cases, use_judge=a.judge, seed=a.seed, video=a.video)
     print((out / "summary.md").read_text())
-    print(f"details: {out}")
+    print(f"open: {out / 'index.html'}")
 
 
 def cmd_generate(a) -> None:
@@ -150,10 +156,15 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--checks", required=True); s.add_argument("--judge", action="store_true")
     s.add_argument("--lint", action="store_true", help="also run the HyperFrames CLI lint")
     s.add_argument("--render", action="store_true", help="with --lint, also render a draft MP4")
+    s.add_argument("--video", dest="render_video", nargs="?", const="preview", choices=["preview", "hyperframes"],
+                   help="add a video to the report: preview (fast, default) or hyperframes (real render)")
     s.add_argument("--out"); s.set_defaults(fn=cmd_verify)
 
     s = sub.add_parser("bench"); s.add_argument("examples"); s.add_argument("--judge", action="store_true")
-    s.add_argument("--seed", type=int, default=0); s.set_defaults(fn=cmd_bench)
+    s.add_argument("--seed", type=int, default=0)
+    s.add_argument("--video", choices=["preview", "hyperframes", "none"], default="preview",
+                   help="video per variant: fast probe preview (default), real HyperFrames render, or none")
+    s.set_defaults(fn=cmd_bench)
 
     s = sub.add_parser("generate"); s.add_argument("briefs"); s.add_argument("--id"); s.add_argument("--out")
     s.add_argument("--skills"); s.set_defaults(fn=cmd_generate)

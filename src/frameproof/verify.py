@@ -78,10 +78,12 @@ def verify(brief: Brief, html_path: Path, checks: list[Check], use_judge: bool =
     decision, score, reasons = decide(results, j["mean"] if j else None)
     return Verdict(decision, score, reasons, results, j,
                    {"brief": brief.id, "html": str(html_path), "seconds": round(time.time() - t0, 2),
-                    "frames": len(obs.frames)})
+                    "frames": len(obs.frames), "duration": obs.duration, "width": obs.width, "height": obs.height})
 
 
-def write_report(v: Verdict, out: Path) -> None:
+def write_report(v: Verdict, out: Path, html: bool = True, compare_to: Path | None = None,
+                 back_link: str | None = None) -> None:
+    """verdict.json + verdict.md, and report.html unless html=False."""
     out.mkdir(parents=True, exist_ok=True)
     (out / "verdict.json").write_text(json.dumps(v.to_dict(), indent=2))
     lines = [f"# {v.decision}  (score {v.score:.2f})", ""]
@@ -93,3 +95,7 @@ def write_report(v: Verdict, out: Path) -> None:
     if v.judge:
         lines += ["", f"Judge ({v.judge['model']}): {v.judge['scores']} - {v.judge['notes']}"]
     (out / "verdict.md").write_text("\n".join(lines) + "\n")
+    if html:
+        from .report import render_run
+
+        render_run(out, compare_to=compare_to, back_link=back_link)

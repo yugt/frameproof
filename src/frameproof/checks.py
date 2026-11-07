@@ -114,6 +114,9 @@ class CheckResult:
     severity: str
     detail: str
     hidden: bool = False
+    times: list[float] = field(default_factory=list)  # when the check looks (for the report timeline)
+    source: str = ""  # the brief phrase it came from
+    params: dict = field(default_factory=dict)
 
 
 # --------------------------------------------------------------------- helpers
@@ -186,7 +189,8 @@ def evaluate(check: Check, obs: Observation, vocabulary: set[str] | None = None)
         ok, detail = _EVAL[check.kind](check.params, obs, vocabulary or set())
     except Exception as e:  # a check that cannot run is a failed check, with the reason
         ok, detail = False, f"error: {type(e).__name__}: {e}"
-    return CheckResult(check.id, check.kind, bool(ok), check.severity, detail, check.hidden)
+    return CheckResult(check.id, check.kind, bool(ok), check.severity, detail, check.hidden,
+                       check.times(), check.source, dict(check.params))
 
 
 def _renders(p, obs, _):
@@ -257,7 +261,7 @@ def _no_unexpected_text(p, obs, vocab):
             if len(extra) >= min_words and len(extra) / len(words) > max_frac:
                 bad.setdefault(tb.text[:60], f.t)
     if bad:
-        return False, f"on-screen text not from the brief: {list(bad.items())[:3]}"
+        return False, f"on-screen text not from the brief: {[(t, txt) for txt, t in bad.items()][:3]}"
     return True, "all visible copy traces to the brief"
 
 

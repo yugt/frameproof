@@ -125,6 +125,68 @@ def sample_times(duration: float, step: float, extra: list[float] = ()) -> list[
     return sorted(ts)
 
 
+def _open(pw, html_path: Path, errors: list[str]):
+    """Launch Chromium, load the composition, install the seek helper, wait for its timeline."""
+    browser = pw.chromium.launch(args=["--force-color-profile=srgb", "--disable-gpu"])
+    page = browser.new_page(viewport={"width": 1920, "height": 1080}, device_scale_factor=1)
+    page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
+    page.on("console", lambda m: errors.append(f"console.error: {m.text}") if m.type == "error" else None)
+    _route(page)
+    page.goto(html_path.as_uri(), wait_until="load")
+    meta = page.evaluate(_SETUP_JS)
+    W, H = int(meta["width"]), int(meta["height"])
+    if (W, H) != (1920, 1080):
+        page.set_viewport_size({"width": W, "height": H})
+    timeline_ok = meta["noTimeline"]
+    if not timeline_ok:
+        try:
+            page.wait_for_function(
+                "id => !!(window.__timelines && window.__timelines[id])", arg=meta["id"],
+                timeout=SETTINGS.timeline_wait_s * 1000)
+            timeline_ok = True
+        except Exception:
+            timeline_ok = False
+    page.evaluate("document.fonts ? document.fonts.ready : null")
+    return browser, page, meta, W, H, timeline_ok
+
+
+def preview_mp4(html_path: str | Path, out: str | Path, fps: int = 30, width: int = 960) -> dict:
+    """Fast preview video: seek the probe's page frame by frame and encode with ffmpeg.
+
+    Same seek model as the verifier, so it shows exactly what was checked. It is not
+    the HyperFrames render (system fonts, emulated clip visibility); use render_mp4
+    for that. Never raises."""
+    from playwright.sync_api import sync_playwright
+
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return {"ok": False, "error": "ffmpeg not on PATH"}
+    html_path, out = Path(html_path).resolve(), Path(out)
+    errors: list[str] = []
+    try:
+        with sync_playwright() as pw:
+            browser, page, meta, W, H, _ = _open(pw, html_path, errors)
+            duration = meta["duration"] or 5.0
+            n = max(1, int(round(duration * fps)))
+            enc = subprocess.Popen(
+                [ffmpeg, "-y", "-loglevel", "error", "-f", "image2pipe", "-framerate", str(fps), "-c:v", "mjpeg",
+                 "-i", "-", "-vf", f"scale={width}:-2", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+                 "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(out)],
+                stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+            root = page.locator("[data-composition-id]").first
+            for i in range(n):
+                page.evaluate("t => window.__fp.seek(t)", i / fps)
+                enc.stdin.write(root.screenshot(type="jpeg", quality=85, animations="disabled"))
+            enc.stdin.close()
+            err = enc.stderr.read().decode()[-1000:]
+            enc.wait()
+            browser.close()
+        return {"ok": enc.returncode == 0 and out.exists(), "kind": "probe-preview", "frames": n,
+                "fps": fps, "errors": errors[:5], "ffmpeg": err}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+
 def probe(html_path: str | Path, times: list[float] | None = None, step: float | None = None,
           out_dir: Path | None = None) -> Observation:
     from playwright.sync_api import sync_playwright
@@ -133,26 +195,7 @@ def probe(html_path: str | Path, times: list[float] | None = None, step: float |
     step = step or SETTINGS.sample_step
     errors: list[str] = []
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(args=["--force-color-profile=srgb", "--disable-gpu"])
-        page = browser.new_page(viewport={"width": 1920, "height": 1080}, device_scale_factor=1)
-        page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
-        page.on("console", lambda m: errors.append(f"console.error: {m.text}") if m.type == "error" else None)
-        _route(page)
-        page.goto(html_path.as_uri(), wait_until="load")
-        meta = page.evaluate(_SETUP_JS)
-        W, H = int(meta["width"]), int(meta["height"])
-        if (W, H) != (1920, 1080):
-            page.set_viewport_size({"width": W, "height": H})
-        timeline_ok = meta["noTimeline"]
-        if not timeline_ok:
-            try:
-                page.wait_for_function(
-                    "id => !!(window.__timelines && window.__timelines[id])", arg=meta["id"],
-                    timeout=SETTINGS.timeline_wait_s * 1000)
-                timeline_ok = True
-            except Exception:
-                timeline_ok = False
-        page.evaluate("document.fonts ? document.fonts.ready : null")
+        browser, page, meta, W, H, timeline_ok = _open(pw, html_path, errors)
         duration = meta["duration"]
         if times is None:
             times = sample_times(duration or 5.0, step)
@@ -209,3 +252,18 @@ def render_gate(project_dir: str | Path, render: bool = False) -> dict:
         result[name] = entry
     result["status"] = "ok" if all(v.get("ok") for v in result.values() if isinstance(v, dict)) else "failed"
     return result
+
+
+def render_mp4(project_dir: str | Path, out: str | Path, quality: str = "draft", timeout: int = 900) -> dict:
+    """Render project_dir/index.html to an MP4 with the real HyperFrames CLI. Never raises."""
+    project_dir, out = Path(project_dir), Path(out).resolve()
+    npx = shutil.which("npx")
+    if not npx:
+        return {"ok": False, "error": "npx not on PATH"}
+    cmd = [npx, "--no-install", "hyperframes", "render", "--quality", quality, "--output", str(out)]
+    try:
+        p = subprocess.run(cmd, cwd=project_dir, capture_output=True, text=True, timeout=timeout)
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    ok = p.returncode == 0 and out.exists()
+    return {"ok": ok, "returncode": p.returncode, "log": (p.stdout + p.stderr)[-3000:]}

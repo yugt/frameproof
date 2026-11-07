@@ -38,6 +38,13 @@ Working and tested:
 - [x] 10 planted-defect operators (`defects.py`).
 - [x] Benchmark (`bench.py`).
 - [x] Adopt/rollback gate with a paired bootstrap (`gate.py`).
+- [x] Report pages (`report.py`). `frameproof bench` writes `runs/bench-*/index.html`, with one
+  card per variant. Each variant's `report.html` has:
+  - the video, synced side by side with the original;
+  - a check timeline: click a marker to jump there and see the probe frame and measurement;
+  - the verdict and the evidence table.
+
+  The pages are static, open from disk, and work in light and dark themes and at phone width.
 - [x] Partner providers (Google, Meta, SubQ) and the checker panel merge. Unit-tested with
   fake checkers; no live call yet.
 
@@ -108,8 +115,10 @@ The HyperFrames CLI collects anonymous usage data by default. To turn it off, ru
 
 ```bash
 frameproof verify examples/tidepool-launch/brief.json examples/tidepool-launch/index.html \
-  --checks examples/tidepool-launch/checks.json [--judge] [--lint [--render]]
-frameproof bench examples                 # planted-defect benchmark
+  --checks examples/tidepool-launch/checks.json [--judge] [--lint [--render]] [--video]
+                                          # writes runs/verify/<id>/report.html
+frameproof bench examples                 # planted-defect benchmark -> runs/bench-*/index.html
+frameproof bench examples --video hyperframes   # real renders instead of probe previews (slow)
 frameproof probe path/to/index.html --at 0.5,2,4 --frames out/
 frameproof compile briefs.json --out checks/
 frameproof generate briefs.json --id <brief-id>
@@ -132,6 +141,12 @@ python -m pytest -q
 | `docs/hyperframes/` | Saved HyperFrames reference pages |
 
 ## Known gaps
+
+- Videos: the default is a **probe preview**, the verifier's own seek-and-screenshot at
+  30 fps encoded by ffmpeg, taking about 14 s per 6 s clip. The real HyperFrames render
+  (`--video hyperframes`) took 5 min 19 s for a 6 s clip on this 2-CPU login node, because
+  it fell back to software screenshot capture. Real renders for every variant need a bigger
+  node, or HyperFrames' BeginFrame path with chrome-headless-shell.
 
 - The probe emulates clip visibility. It does not expand nested compositions
   (`data-composition-src`) and does not seek `<video>` clips.
