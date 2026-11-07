@@ -9,6 +9,7 @@ dependencies = [
   "playwright>=1.48",
   "numpy>=1.26",
   "pillow>=10.4",
+  "google-adk>=2.14",
 ]
 
 [project.optional-dependencies]
