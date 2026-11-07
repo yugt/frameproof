@@ -82,7 +82,9 @@ def test_studio_end_to_end_replay(monkeypatch, tmp_path):
     assert any("Attempt 2 by replay:original, after" in t for t in texts)
     delivered = [t for t in texts if t.startswith("DELIVERED")]
     assert delivered, texts[-3:]
-    run_dir = Path(delivered[0].split("Open ")[1]).parent
+    assert "Saved as artifact tidepool-launch.mp4" in delivered[0]
+    rel = delivered[0].split("Run page: http://localhost:4600/")[1].split()[0].rstrip("/")
+    run_dir = graph.SETTINGS.runs_dir / rel
     summary = json.loads((run_dir / "summary.json").read_text())
     assert summary["status"] == "DELIVERED" and summary["attempts"] == 2
     seen = json.loads((run_dir / "attempt-2" / "proposer.json").read_text())["feedback_seen"]

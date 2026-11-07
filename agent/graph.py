@@ -90,7 +90,7 @@ def intake(node_input: str):
         "run_id": run_id, "run_dir": str(run_dir),
         "attempt": 0, "max_attempts": int(os.environ.get("FP_MAX_ATTEMPTS", "4")),
         "feedback": [], "history": [],
-    }, message=f"Brief {brief.id!r}. Run folder: {run_dir}")
+    }, message=f"Brief {brief.id!r}. Run page (fills in as attempts finish): {page_url(run_dir)}")
 
 
 def _no_proposer_message(brief: Brief) -> str:
@@ -371,7 +371,17 @@ def _answer(node_input) -> DeskAnswer:
     return DeskAnswer(approved=s not in {"no", "reject", "false", "stop"}, note=str(node_input))
 
 
-def deliver(node_input, run_dir: str, brief: dict, history: list, desk: dict):
+def page_url(run_dir: str | Path) -> str:
+    """The run page on the reports server (python -m http.server 4600 --directory runs)."""
+    base = os.environ.get("FP_REPORTS_URL", "http://localhost:4600").rstrip("/")
+    try:
+        rel = Path(run_dir).resolve().relative_to(SETTINGS.runs_dir.resolve()).as_posix()
+    except ValueError:
+        return str(Path(run_dir) / "index.html")
+    return f"{base}/{rel}/"
+
+
+async def deliver(ctx, node_input, run_dir: str, brief: dict, history: list, desk: dict):
     ans = _answer(node_input)
     video = Path(ans.video or desk["video"])
     ok = ans.approved and ans.ok and video.exists()
@@ -380,15 +390,25 @@ def deliver(node_input, run_dir: str, brief: dict, history: list, desk: dict):
                "attempts": len(history), "final": history[-1] if history else None}
     (Path(run_dir) / "summary.json").write_text(json.dumps(summary, indent=2))
     write_studio_index(Path(run_dir), brief, history, status=status, final_video=video if ok else None)
-    yield Event(message=f"{status}: {video if ok else ans.note or 'no video'} "
-                        f"after {len(history)} attempt(s). Open {Path(run_dir) / 'index.html'}")
+    saved = ""
+    if ok:  # adk web lists session artifacts in its Artifacts tab, so the video plays there too
+        try:
+            from google.genai import types
+
+            v = await ctx.save_artifact(f"{brief['id']}.mp4",
+                                        types.Part.from_bytes(data=video.read_bytes(), mime_type="video/mp4"))
+            saved = f" Saved as artifact {brief['id']}.mp4 (v{v})."
+        except Exception as e:  # no artifact service (some runners): the files on disk are enough
+            saved = f" (artifact not saved: {type(e).__name__})"
+    yield Event(message=f"{status} after {len(history)} attempt(s).{saved} Run page: {page_url(run_dir)}"
+                        + ("" if ok else f" ({ans.note or 'no video'})"))
 
 
 def give_up(run_dir: str, brief: dict, history: list):
     (Path(run_dir) / "summary.json").write_text(json.dumps({"status": "GAVE_UP", "attempts": len(history),
                                                             "final": history[-1] if history else None}, indent=2))
     write_studio_index(Path(run_dir), brief, history, status="GAVE_UP")
-    yield Event(message=f"GAVE_UP after {len(history)} attempts; nothing shipped. Open {Path(run_dir) / 'index.html'}")
+    yield Event(message=f"GAVE_UP after {len(history)} attempts; nothing shipped. Run page: {page_url(run_dir)}")
 
 
 # ------------------------------------------------------------------------ graph
