@@ -74,3 +74,13 @@ def test_load_secrets(tmp_path, monkeypatch):
     assert "FP_TEST_A" in loaded and "FP_TEST_B" not in loaded
     monkeypatch.delenv("FP_TEST_A", raising=False)
     monkeypatch.delenv("FP_TEST_C", raising=False)
+
+
+def test_alibaba_provider(monkeypatch):
+    assert llm.family("alibaba:qwen3-coder-plus") == "qwen"
+    monkeypatch.delenv("ALIBABA_API_KEY", raising=False)
+    monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="ALIBABA_API_KEY"):
+        llm.openai_client("alibaba")
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "x")
+    assert PROVIDERS["alibaba"].key() == "x" and PROVIDERS["alibaba"].url().endswith("/compatible-mode/v1")

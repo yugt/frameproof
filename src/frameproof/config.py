@@ -5,6 +5,7 @@ Model strings are "<provider>:<model>". Providers (see PROVIDERS below):
   openai     OpenAI, or any OpenAI-compatible endpoint via FP_OPENAI_BASE_URL
   google     Gemini, OpenAI-compatible endpoint     (GOOGLE_API_KEY or GEMINI_API_KEY)
   meta       Llama API, OpenAI-compatible endpoint  (LLAMA_API_KEY)
+  alibaba    Qwen on Alibaba Cloud Model Studio, OpenAI-compatible (ALIBABA_API_KEY or DASHSCOPE_API_KEY)
   subq       Subquadratic (SUBQ_API_KEY). Snap models are decision models
              (POST /systemone, probabilities, no text): judge or check voter only.
 Base URLs can be overridden with FP_<PROVIDER>_BASE_URL. Run `frameproof models`
@@ -72,6 +73,11 @@ PROVIDERS: dict[str, Provider] = {
                        ("GOOGLE_API_KEY", "GEMINI_API_KEY"), "gemini"),
     "meta": Provider("meta", "https://api.llama.com/compat/v1/", ("LLAMA_API_KEY", "META_API_KEY"), "llama"),
     "subq": Provider("subq", "https://api.subq.ai/v1", ("SUBQ_API_KEY",), "subq"),
+    # Alibaba Cloud Model Studio (Qwen), OpenAI-compatible mode. Default is the Token Plan host
+    # (cn-beijing); for pay-as-you-go use https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    # (international) or https://dashscope.aliyuncs.com/compatible-mode/v1 via FP_ALIBABA_BASE_URL.
+    "alibaba": Provider("alibaba", "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+                        ("ALIBABA_API_KEY", "DASHSCOPE_API_KEY"), "qwen"),
 }
 
 

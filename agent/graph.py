@@ -100,7 +100,7 @@ def _no_proposer_message(brief: Brief) -> str:
         PROVIDERS[provider].key_envs if provider in PROVIDERS else ("its API key",))
     return (f"Nobody can write this video yet. {brief.text[:60]!r} is a free-text brief, so a text model "
             f"has to write the HTML, but the implementer {spec} has no key ({' or '.join(keys)}). "
-            f"Add that key to secrets.env, or set FP_IMPLEMENTER_MODEL to a google:/meta: model whose key "
+            f"Add that key to secrets.env, or set FP_IMPLEMENTER_MODEL to an alibaba:/google:/meta: model whose key "
             f"you have. To see the loop without a key, send an example folder instead: examples/tidepool-launch")
 
 
