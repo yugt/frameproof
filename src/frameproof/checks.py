@@ -293,8 +293,11 @@ def _text_region(p, obs, _):
     if not hits:
         return False, f"'{p['text']}' not visible at {f.t}s"
     test = REGIONS[p["region"]]
-    cx, cy = hits[0].center()
-    rx, ry = cx / obs.width, cy / obs.height
+    # A phrase split into one element per word (word-by-word reveals) matches several
+    # boxes: judge the box around all of them, not the first word.
+    x0, y0 = min(b.x for b in hits), min(b.y for b in hits)
+    x1, y1 = max(b.x + b.w for b in hits), max(b.y + b.h for b in hits)
+    rx, ry = (x0 + x1) / 2 / obs.width, (y0 + y1) / 2 / obs.height
     return test(rx, ry), f"'{p['text']}' centre at ({rx:.2f}, {ry:.2f}), want {p['region']}"
 
 

@@ -79,3 +79,11 @@ def test_decide_policy():
 def test_check_from_flat_dict():
     c = Check.from_dict({"id": "x", "kind": "text_visible", "text": "Hi", "at": 1.0, "severity": "soft"})
     assert c.params == {"text": "Hi", "at": 1.0} and c.severity == "soft"
+
+
+def test_region_uses_the_whole_split_phrase():
+    # "Notes that think" centred, one box per word: the first word alone sits left of centre
+    words = [TextBox(w, x=x, y=48, w=30, h=12, color="#FFFFFF", opacity=1) for w, x in
+             [("Notes", 46), ("that", 81), ("think", 116)]]
+    o = obs({1.0: Frame(1.0, words, png())})
+    assert evaluate(Check("r", "text_region", {"text": "Notes that think", "at": 1.0, "region": "center"}), o).passed
