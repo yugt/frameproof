@@ -78,9 +78,11 @@ def test_load_secrets(tmp_path, monkeypatch):
 
 def test_alibaba_provider(monkeypatch):
     assert llm.family("alibaba:qwen3-coder-plus") == "qwen"
+    assert llm.family("alibaba:kimi-k2.5") == "kimi" and llm.family("alibaba:glm-5") == "glm"
+    assert llm.family("alibaba:MiniMax-M2.5") == "minimax"
     monkeypatch.delenv("ALIBABA_API_KEY", raising=False)
     monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
     with pytest.raises(RuntimeError, match="ALIBABA_API_KEY"):
         llm.openai_client("alibaba")
     monkeypatch.setenv("DASHSCOPE_API_KEY", "x")
-    assert PROVIDERS["alibaba"].key() == "x" and PROVIDERS["alibaba"].url().endswith("/compatible-mode/v1")
+    assert PROVIDERS["alibaba"].key() == "x" and PROVIDERS["alibaba"].url().startswith("https://coding-intl.dashscope.aliyuncs.com")

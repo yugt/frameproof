@@ -73,10 +73,11 @@ PROVIDERS: dict[str, Provider] = {
                        ("GOOGLE_API_KEY", "GEMINI_API_KEY"), "gemini"),
     "meta": Provider("meta", "https://api.llama.com/compat/v1/", ("LLAMA_API_KEY", "META_API_KEY"), "llama"),
     "subq": Provider("subq", "https://api.subq.ai/v1", ("SUBQ_API_KEY",), "subq"),
-    # Alibaba Cloud Model Studio (Qwen), OpenAI-compatible mode. Default is the Token Plan host
-    # (cn-beijing); for pay-as-you-go use https://dashscope-intl.aliyuncs.com/compatible-mode/v1
-    # (international) or https://dashscope.aliyuncs.com/compatible-mode/v1 via FP_ALIBABA_BASE_URL.
-    "alibaba": Provider("alibaba", "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+    # Alibaba Cloud Model Studio, OpenAI-compatible. Default: the Coding Plan host, where sk-sp-
+    # keys work (models seen 2026-11-07: qwen3.5/3.6/3.7-plus, kimi-k2.5, glm-5, MiniMax-M2.5).
+    # Pay-as-you-go keys: FP_ALIBABA_BASE_URL=https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    # (or dashscope.aliyuncs.com for mainland China). Family comes from the model name.
+    "alibaba": Provider("alibaba", "https://coding-intl.dashscope.aliyuncs.com/v1",
                         ("ALIBABA_API_KEY", "DASHSCOPE_API_KEY"), "qwen"),
 }
 
