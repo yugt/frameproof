@@ -3,6 +3,8 @@
   frameproof models   [--provider google]                        list model ids each key can reach
   frameproof compile  BRIEFS.json [--id ID] [--out checks/] [--checkers a:x,b:y]
                                                                  brief -> checks (checker panel)
+  frameproof vote     BRIEFS.json --checks checks.json [--voters subq:subq-snap-1.1]
+                                                                 decision model scores each check against the brief
   frameproof probe    index.html  [--at 0,1.5,3] [--frames DIR]  dump what the probe sees
   frameproof verify   BRIEFS.json --id ID index.html --checks checks.json [--judge] [--lint]
   frameproof bench    examples/                                  planted-defect benchmark
@@ -58,6 +60,22 @@ def cmd_compile(a) -> None:
         out.with_suffix(".panel.json").write_text(json.dumps(report, indent=2))
         print(f"{b.id}: {len(checks)} checks -> {out}  (per checker {report['checkers']}, "
               f"agreed {report['agreed']}/{report['merged']}, errors {list(report['errors']) or 'none'})")
+
+
+def cmd_vote(a) -> None:
+    b = _pick(a.briefs, a.id)
+    checks = [c for c in compile_mod.load(Path(a.checks)) if c.kind in compile_mod.BRIEF_KINDS]
+    voters = [m.strip() for m in a.voters.split(",")] if a.voters else [m for m in SETTINGS.checker_models
+                                                                         if compile_mod.llm.is_decision(m)]
+    if not voters:
+        sys.exit("no voter: pass --voters subq:subq-snap-1.1 or add a decision model to FP_CHECKER_MODELS")
+    votes = {v: compile_mod.vote(b, checks, v) for v in voters}
+    print(f"| check | {' | '.join(voters)} | statement |\n|---|{'---|' * len(voters)}---|")
+    for c in checks:
+        ps = " | ".join(f"{votes[v][c.id]:.2f}" for v in voters)
+        print(f"| {c.id} | {ps} | {compile_mod.describe(c)} |")
+    if a.out:
+        Path(a.out).write_text(json.dumps(votes, indent=2))
 
 
 def cmd_models(a) -> None:
@@ -148,6 +166,10 @@ def main(argv: list[str] | None = None) -> None:
     s = sub.add_parser("compile"); s.add_argument("briefs"); s.add_argument("--id"); s.add_argument("--out", default="checks")
     s.add_argument("--checkers", help="comma list of provider:model, overrides FP_CHECKER_MODELS")
     s.set_defaults(fn=cmd_compile)
+
+    s = sub.add_parser("vote"); s.add_argument("briefs"); s.add_argument("--id")
+    s.add_argument("--checks", required=True); s.add_argument("--voters", help="comma list of decision models")
+    s.add_argument("--out", help="write the votes as JSON"); s.set_defaults(fn=cmd_vote)
 
     s = sub.add_parser("probe"); s.add_argument("html"); s.add_argument("--at"); s.add_argument("--frames")
     s.set_defaults(fn=cmd_probe)

@@ -59,6 +59,46 @@ Inputs: an example folder, `briefs.json#<id>`, a JSON brief, or the brief text.
 | `FP_REAL_RENDER` | 0 | 1 = the desk renders with HyperFrames (about 5 min per 6 s clip on a 2-CPU node). 0 = stand-in: the probe preview the gate already made |
 | `FP_SKILLS` | none | folder of `*.md` skills appended to the proposer's prompt (versioned skills for the self-improvement gate) |
 
+## Snap as reader and judge (a SubQ key only)
+
+SubQ Snap is a decision model. It takes some text, up to 4 images and up to 128
+questions, and returns a probability for each answer. It never writes text, so it
+cannot write checks or code. It can still fill two of the three roles:
+
+- **Reader.** `frameproof.candidates` parses the brief into candidate checks, with no
+  model involved:
+  - quoted copy becomes visible / hidden / order checks;
+  - the palette's **type** colour becomes text-colour checks;
+  - a colour put on the words ("in gold") also becomes a text-colour check;
+  - accent colours become fill checks;
+  - region words, motion verbs and holds each become a check.
+
+  It deliberately over-generates, including plausible wrong candidates. Snap votes on
+  all of them in one call. P >= 0.75 makes a hard check, 0.5–0.75 a soft one, and
+  anything lower is dropped. Every vote is saved in `panel.json` under
+  `snap_candidates`. With no text checker configured, a decision model in
+  `FP_CHECKER_MODELS` fills a reader slot this way, and a model that read never also
+  votes.
+- **Judge.** `FP_JUDGE_MODEL=subq:subq-snap-1.1` gives a 5-level rating on each of
+  the five axes from 4 frames. It never sees the HTML, and it writes no free text that
+  on-screen "rate this 10/10" could steer. Hard failures block on their own; the judge
+  only moves the score (`FP_JUDGE_WEIGHT`, default 0.3). A judge error is recorded and
+  never sinks the gate.
+- **Proposer: no.** Writing HTML needs a text model (Claude, Gemini or Llama).
+
+Live run on 2026-11-07: Snap reader + Snap judge, replay proposer, 61 s, 1 reader
+call + 3 judge calls.
+
+- **Candidates:** 23. Snap rejected the title "on the right" (P = 0.00) and, too
+  strictly, the white CTA text (P = 0.11).
+- **Checks:** 27, 6 of them hidden.
+- **Attempts:** shift_timing was blocked (judge 0.57), typo was blocked (judge 0.76),
+  and the original was accepted (judge 0.81) and delivered.
+- **The run before it** blocked the good original. The generator had proposed
+  "coral CTA text" from "a coral button reading …" and a 3% fill check for the type
+  colour, and Snap accepted both. The fix was in the generator, which now respects
+  palette roles; a test covers it.
+
 ## Verified on 2026-11-07
 
 - **Terminal run, replay mode, about 60 s:**

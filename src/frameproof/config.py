@@ -5,7 +5,8 @@ Model strings are "<provider>:<model>". Providers (see PROVIDERS below):
   openai     OpenAI, or any OpenAI-compatible endpoint via FP_OPENAI_BASE_URL
   google     Gemini, OpenAI-compatible endpoint     (GOOGLE_API_KEY or GEMINI_API_KEY)
   meta       Llama API, OpenAI-compatible endpoint  (LLAMA_API_KEY)
-  subq       Subquadratic, OpenAI-compatible        (SUBQ_API_KEY)
+  subq       Subquadratic (SUBQ_API_KEY). Snap models are decision models
+             (POST /systemone, probabilities, no text): judge or check voter only.
 Base URLs can be overridden with FP_<PROVIDER>_BASE_URL. Run `frameproof models`
 to see which models each key can reach.
 
@@ -96,6 +97,9 @@ class Settings:
     # Checker panel: a check proposed by at least this many checkers becomes hard,
     # otherwise soft. With one checker, the checker's own severity is kept.
     agree_min: int = int(_env("FP_AGREE_MIN", "2"))
+    # Decision models in the panel (subq:subq-snap-*) vote instead of proposing: a vote
+    # of P(brief asks for it) >= vote_min counts as one more checker backing the check.
+    vote_min: float = float(_env("FP_VOTE_MIN", "0.5"))
 
     # Probe
     sample_step: float = float(_env("FP_SAMPLE_STEP", "0.25"))  # seconds between generic-check samples

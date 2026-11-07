@@ -50,6 +50,9 @@ def family(spec: str) -> str:
 def complete(spec: str, system: str, prompt: str, images: list[bytes] | None = None,
              max_tokens: int = 16000, effort: str = "high") -> Reply:
     provider, model = _split(spec)
+    if is_decision(spec):
+        raise RuntimeError(f"{spec} is a decision model: it can judge frames or vote on checks, "
+                           "but it cannot write text (checks, code)")
     if provider == "anthropic":
         return _anthropic(model, system, prompt, images or [], max_tokens, effort)
     if provider in PROVIDERS:
@@ -119,6 +122,85 @@ def _openai(provider: str, model: str, system: str, prompt: str, images: list[by
     )
     choice = resp.choices[0]
     return Reply(text=choice.message.content or "", model=model, stop_reason=choice.finish_reason)
+
+
+# ------------------------------------------------------------ decision models
+#
+# SubQ Snap is a decision model: it does not write text. POST /v1/systemone takes a
+# `state` (text), up to 4 images and up to 128 named questions, and returns a
+# probability per question (noul = yes/no, choice, score on 2-10 ordered levels).
+# Chat/responses requests are refused with 400. Docs: docs.subq.ai/endpoints/decisions-api/
+
+DECISION_MAX_IMAGES = 4
+DECISION_MAX_QUESTIONS = 128
+
+
+def is_decision(spec: str) -> bool:
+    """Decision models answer questions with probabilities instead of writing text."""
+    if not spec or ":" not in spec:
+        return False
+    provider, model = _split(spec)
+    return provider == "subq" and "snap" in model.lower()
+
+
+def _decision_image(png: bytes, max_w: int = 960) -> dict:
+    """JPEG, at most `max_w` wide: well under the 1.6 MP point where Snap charges more tokens."""
+    import io
+
+    from PIL import Image
+
+    im = Image.open(io.BytesIO(png)).convert("RGB")
+    im.thumbnail((max_w, max_w))
+    buf = io.BytesIO()
+    im.save(buf, "JPEG", quality=88)
+    return {"mediaType": "image/jpeg", "base64": base64.b64encode(buf.getvalue()).decode()}
+
+
+def decide(spec: str, state: str, questions: dict[str, dict], images: list[bytes] | None = None,
+           timeout: float = 120.0, retries: int = 2) -> dict:
+    """Ask a decision model. Returns {"answers": {name: {...}}, "usage": {...}, "model": ...}.
+
+    Each answer has `type` plus `noul` (P(yes)), or `choice`/`probabilities`/`confidence`,
+    or `score` (probability-weighted level index, 0-based)/`legend`/`probabilities`/`confidence`.
+    """
+    import time
+    import urllib.error
+    import urllib.request
+
+    provider, model = _split(spec)
+    if provider not in PROVIDERS:
+        raise RuntimeError(f"Unknown provider {provider!r}")
+    images = images or []
+    if len(images) > DECISION_MAX_IMAGES:
+        raise ValueError(f"decision models take at most {DECISION_MAX_IMAGES} images, got {len(images)}")
+    if not 1 <= len(questions) <= DECISION_MAX_QUESTIONS:
+        raise ValueError(f"decision models take 1-{DECISION_MAX_QUESTIONS} questions, got {len(questions)}")
+    prov = PROVIDERS[provider]
+    key = prov.key()
+    if not key:
+        raise RuntimeError(f"No API key for {provider}: set one of {', '.join(prov.key_envs)} (or put it in secrets.env)")
+    body: dict = {"model": model, "state": state, "questions": questions}
+    if images:
+        body["images"] = [_decision_image(p) for p in images]
+    url = (prov.url() or "").rstrip("/") + "/systemone"
+    data = json.dumps(body).encode()
+    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    for attempt in range(retries + 1):
+        req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            if e.code in (429, 503) and attempt < retries:
+                time.sleep(2 * (attempt + 1))
+                continue
+            text = e.read().decode(errors="replace")
+            try:
+                detail = json.loads(text).get("detail", text)
+            except ValueError:
+                detail = text
+            raise RuntimeError(f"{spec} decision request failed ({e.code}): {str(detail)[:300]}") from None
+    raise RuntimeError("unreachable")
 
 
 _FENCE = re.compile(r"```(?:json|html)?\s*\n(.*?)```", re.S)

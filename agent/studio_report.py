@@ -57,6 +57,9 @@ D.history.forEach((h, i) => {
   const b = el('div');
   const r = el('div', 'row'); r.append(el('b', null, 'Attempt ' + h.attempt)); r.append(el('span', 'badge ' + h.decision, h.decision));
   r.append(el('span', 'tag', h.proposer)); r.append(el('span', 'muted', 'score ' + h.score.toFixed(2))); b.append(r);
+  if (h.judge && h.judge.scores) { const j = el('div', 'muted', 'judge ' + h.judge.model + ': ' +
+    Object.entries(h.judge.scores).map(([k, v]) => k.replace('_', ' ') + ' ' + v).join(' · ')); b.append(j); }
+  else if (h.judge && h.judge.error) b.append(el('div', 'muted', 'judge error: ' + h.judge.error));
   const ul = el('ul'); (h.reasons.length ? h.reasons.slice(0, 4) : ['all checks passed']).forEach(x => ul.append(el('li', null, x)));
   if (h.reasons.length > 4) ul.append(el('li', 'muted', `… ${h.reasons.length - 4} more`));
   b.append(ul); a.append(b); steps.append(a);

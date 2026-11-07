@@ -40,8 +40,9 @@ from frameproof.checks import Check
 from frameproof.config import PROVIDERS, ROOT, SETTINGS
 from frameproof.defects import mutants
 from frameproof.generate import generate
-from frameproof.probe import preview_mp4
-from frameproof.verify import verify, write_report
+from frameproof.judge import judge
+from frameproof.probe import preview_mp4, probe
+from frameproof.verify import decide, times_needed, verify, write_report
 
 from . import desk as desk_mod
 from .schemas import AttemptRecord, DeskAnswer, ReaderOutput
@@ -96,24 +97,42 @@ def _brief(d: dict) -> Brief:
 # ---------------------------------------------------------------------- readers
 
 
+def _configured(m: str) -> bool:
+    return bool(m) and "<" not in m  # "meta:<llama-id>" is the secrets.env placeholder
+
+
 def _writer_models() -> list[str]:
-    return [m for m in SETTINGS.checker_models if not llm.is_decision(m)]
+    return [m for m in SETTINGS.checker_models if _configured(m) and not llm.is_decision(m)]
 
 
 def _voter_models() -> list[str]:
-    return [m for m in SETTINGS.checker_models if llm.is_decision(m)]
+    return [m for m in SETTINGS.checker_models if _configured(m) and llm.is_decision(m)]
+
+
+def _reader_slots() -> list[tuple[str, str]]:
+    """(model, how) per reader slot: models that write checks first ("writes"), then
+    decision models as Snap readers ("snap": candidates from the brief + their votes)."""
+    slots = [(m, "writes") for m in _writer_models()]
+    slots += [(m, "snap") for m in _voter_models()]
+    return slots[:READER_SLOTS]
 
 
 async def _read(slot: int, brief: dict) -> dict:
-    models = _writer_models()
-    if slot >= len(models):
+    slots = _reader_slots()
+    if slot >= len(slots):
         return ReaderOutput(slot=slot, skipped=True).model_dump()
-    m = models[slot]
+    m, how = slots[slot]
     try:
+        if how == "snap":
+            from frameproof.candidates import snap_reader
+
+            checks, report = await asyncio.to_thread(snap_reader, _brief(brief), m, SETTINGS.vote_min)
+            return ReaderOutput(slot=slot, model=m, how=how, checks=[c.to_dict() for c in checks],
+                                votes=report).model_dump()
         checks = await asyncio.to_thread(compile_mod.propose, _brief(brief), m)
-        return ReaderOutput(slot=slot, model=m, checks=[c.to_dict() for c in checks]).model_dump()
+        return ReaderOutput(slot=slot, model=m, how=how, checks=[c.to_dict() for c in checks]).model_dump()
     except Exception as e:  # one reader failing must not sink the panel
-        return ReaderOutput(slot=slot, model=m, error=f"{type(e).__name__}: {e}").model_dump()
+        return ReaderOutput(slot=slot, model=m, how=how, error=f"{type(e).__name__}: {e}").model_dump()
 
 
 async def reader_1(brief: dict):
@@ -146,7 +165,7 @@ async def panel(node_input: dict, brief: dict, run_dir: str, example_dir: str = 
             c.id = f"b{i+1}-{c.kind}"
         votes: dict[str, dict[str, float]] = {}
         voted = []
-        for v in _voter_models():
+        for v in [m for m in _voter_models() if m not in per_model]:  # a Snap reader does not vote twice
             try:
                 for cid, p in (await asyncio.to_thread(compile_mod.vote, b, merged, v)).items():
                     votes.setdefault(cid, {})[v] = p
@@ -156,7 +175,9 @@ async def panel(node_input: dict, brief: dict, run_dir: str, example_dir: str = 
         if voted:
             compile_mod.apply_votes(merged, votes, SETTINGS.agree_min, len(per_model) + len(voted), SETTINGS.vote_min)
         checks = compile_mod.mark_hidden(merged, b.id) + compile_mod.generic_checks(b.duration)
-        source = {"mode": "panel", "writers": list(per_model), "voters": voted, "errors": errors}
+        source = {"mode": "panel", "readers": {o.model: o.how for o in outs if o.model and o.checks},
+                  "voters": voted, "errors": errors,
+                  "snap_candidates": {o.model: o.votes for o in outs if o.votes}}
     elif example_dir and (Path(example_dir) / "checks.json").exists():
         checks = compile_mod.load(Path(example_dir) / "checks.json")
         source = {"mode": "fixture", "file": str(Path(example_dir) / "checks.json"), "errors": errors,
@@ -220,10 +241,30 @@ async def proposer(brief: dict, attempt: int, run_dir: str, feedback: list, exam
 # ------------------------------------------------------------------------- gate
 
 
+def _judge_ready() -> bool:
+    spec = SETTINGS.judge_model
+    if not _configured(spec):
+        return False
+    provider = spec.partition(":")[0]
+    if provider == "anthropic":
+        return bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"))
+    return provider in PROVIDERS and bool(PROVIDERS[provider].key())
+
+
 def _verify_attempt(brief: dict, attempt_dir: Path, checks: list[dict], prev_dir: Path | None):
     b = _brief(brief)
     cs = [Check.from_dict(c) for c in checks]
-    v = verify(b, attempt_dir / "index.html", cs, frames_dir=attempt_dir / "frames")
+    obs = probe(attempt_dir / "index.html", times=times_needed(cs, b.duration, SETTINGS.sample_step),
+                out_dir=attempt_dir / "frames")
+    v = verify(b, attempt_dir / "index.html", cs, obs=obs)
+    # Taste judge (FP_JUDGE_MODEL), from frames only. Hard failures still block on
+    # their own; the judge moves the score. A judge error never sinks the gate.
+    if _judge_ready() and obs.frames and obs.timeline_ok:
+        try:
+            v.judge = judge(b, obs)
+            v.decision, v.score, v.reasons = decide(v.results, v.judge["mean"])
+        except Exception as e:
+            v.meta["judge_error"] = f"{type(e).__name__}: {e}"[:300]
     v.meta["render"] = preview_mp4(attempt_dir / "index.html", attempt_dir / "video.mp4")
     v.meta["variant"] = attempt_dir.name
     write_report(v, attempt_dir, compare_to=prev_dir, back_link="../index.html")
@@ -241,7 +282,9 @@ async def gate(brief: dict, attempt: int, attempt_dir: str, checks: list, histor
         decision=v.decision, score=round(v.score, 3), reasons=v.reasons,
         public_feedback=v.public_feedback(),
         hidden_failures=sum(1 for r in v.results if r.hidden and not r.passed),
-        report=str(ad / "report.html"))
+        report=str(ad / "report.html"),
+        judge=({"model": v.judge["model"], "scores": v.judge["scores"], "mean": round(v.judge["mean"], 3)}
+               if v.judge else ({"error": v.meta["judge_error"]} if "judge_error" in v.meta else None)))
     history = history + [rec.model_dump()]
     if v.decision == "ACCEPT":
         route = "ACCEPT"
@@ -251,7 +294,10 @@ async def gate(brief: dict, attempt: int, attempt_dir: str, checks: list, histor
         route = "GIVE_UP"
     write_studio_index(Path(run_dir), brief, history, status=route)
     shown = rec.public_feedback[:6]
-    msg = (f"Gate: {v.decision} (score {v.score:.2f}) -> {route}. "
+    judged = (f" Judge {v.judge['model']}: mean {v.judge['mean']:.2f}, weakest "
+              f"{min(v.judge['scores'], key=v.judge['scores'].get)}." if v.judge else
+              (f" Judge error: {v.meta['judge_error'][:120]}" if "judge_error" in v.meta else ""))
+    msg = (f"Gate: {v.decision} (score {v.score:.2f}) -> {route}.{judged} "
            + (f"{len(rec.public_feedback)} public failures go back to the proposer"
               f"{' (+' + str(rec.hidden_failures) + ' hidden, not shown)' if rec.hidden_failures else ''}: "
               + "; ".join(shown) if route == "REVISE" else ""))

@@ -13,8 +13,10 @@ class ReaderOutput(BaseModel):
     slot: int
     model: str | None = None
     checks: list[dict] = Field(default_factory=list)
+    how: str = ""  # "writes" (text model proposes checks) or "snap" (decision model votes on candidates)
     error: str | None = None
     skipped: bool = False
+    votes: dict | None = None  # snap readers: every candidate with its P(the brief asks for it)
 
 
 class AttemptRecord(BaseModel):
@@ -29,6 +31,7 @@ class AttemptRecord(BaseModel):
     public_feedback: list[str]  # what the proposer is allowed to see next time
     hidden_failures: int  # how many hidden checks failed (count only, never their content)
     report: str
+    judge: dict | None = None  # {"model", "scores", "mean"} or {"error"}; the judge sees frames only
 
 
 class DeskReceipt(BaseModel):

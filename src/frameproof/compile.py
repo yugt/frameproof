@@ -77,6 +77,12 @@ def compile_brief(brief: Brief, models: list[str] | str | None = None) -> tuple[
     models = models or SETTINGS.checker_models
     if not models:
         llm._split("")  # raises the "no model configured" error
+    # Decision models (SubQ Snap) cannot write checks; in the panel they vote on them.
+    voters = [m for m in models if llm.is_decision(m)]
+    models = [m for m in models if not llm.is_decision(m)]
+    if not models:
+        raise RuntimeError(f"the checker panel needs at least one model that writes checks; "
+                           f"{', '.join(voters)} can only vote on them")
     per_model: dict[str, list[Check]] = {}
     errors: dict[str, str] = {}
     for m in models:
@@ -89,16 +95,109 @@ def compile_brief(brief: Brief, models: list[str] | str | None = None) -> tuple[
     merged = merge(per_model, agree_min=SETTINGS.agree_min)
     for i, c in enumerate(merged):
         c.id = f"b{i+1}-{c.kind}"
+    votes: dict[str, dict[str, float]] = {}
+    voted: list[str] = []
+    for v in voters:
+        try:
+            for cid, p in vote(brief, merged, v).items():
+                votes.setdefault(cid, {})[v] = p
+            voted.append(v)
+        except Exception as e:  # a failing voter leaves the proposers' result as is
+            errors[v] = f"{type(e).__name__}: {e}"
+    panel = len(per_model) + len(voted)
+    if voted:
+        apply_votes(merged, votes, SETTINGS.agree_min, panel, SETTINGS.vote_min)
+    need = min(SETTINGS.agree_min, panel)
     report = {
         "brief": brief.id,
         "checkers": {m: len(cs) for m, cs in per_model.items()},
+        "voters": voted,
         "errors": errors,
         "merged": len(merged),
-        "agreed": sum(len(c.origin) >= min(SETTINGS.agree_min, len(per_model)) for c in merged),
+        "agreed": sum(len(c.origin) >= need for c in merged),
         "single_source": [{"id": c.id, "by": c.origin, "source": c.source} for c in merged
-                          if len(per_model) > 1 and len(c.origin) == 1],
+                          if panel > 1 and len(c.origin) == 1],
+        "votes": votes,
     }
     return mark_hidden(merged, brief.id) + generic_checks(brief.duration), report
+
+
+# ------------------------------------------------------------ voting on checks
+#
+# A decision model reads the brief and one plain-language statement per check and
+# returns P(the brief asks for this). A yes counts as one more panel member backing
+# the check, so one writing checker plus one voter can make a check hard; a no
+# leaves it soft. The voter sees only the brief and the checks, never the code.
+
+VOTE_STATE = """Design brief for a short motion-graphics video:
+<brief>
+{text}
+</brief>
+
+Each question is an acceptance test someone wrote from this brief. Decide whether
+the brief itself asks for it."""
+
+VOTE_CRITERIA = {
+    "true": "the brief states or directly implies it: same on-screen words, colour, layout and order, "
+            "timing within about a second of the brief's scene windows",
+    "false": "the brief does not ask for it, or it contradicts the brief "
+             "(different words, colour, position, order or timing)",
+}
+
+
+def describe(c: Check) -> str:
+    """A check as one sentence a model can judge against the brief."""
+    p = c.params
+    t = lambda k: f"{float(p[k]):g} s"  # noqa: E731
+    k = c.kind
+    if k == "text_visible":
+        return f'At {t("at")}, the words "{p["text"]}" are visible on screen.'
+    if k == "text_hidden":
+        return f'At {t("at")}, the words "{p["text"]}" are not on screen.'
+    if k == "text_color":
+        return f'At {t("at")}, the words "{p["text"]}" are shown in colour {p["color"]}.'
+    if k == "text_region":
+        return f'At {t("at")}, the words "{p["text"]}" are in the {p["region"]} of the frame.'
+    if k == "bg_color":
+        share = float(p.get("min_fraction", 0.3))
+        return f"At {t('at')}, at least {share:.0%} of the frame is colour {p['color']}."
+    if k == "palette":
+        share = float(p.get("min_fraction", 0.6))
+        return f"At least {share:.0%} of the frame is made of the palette {', '.join(p.get('colors', []))}."
+    if k == "motion":
+        return f"Something visibly moves between {t('t0')} and {t('t1')}."
+    if k == "still":
+        return f"The frame holds still between {t('t0')} and {t('t1')}."
+    if k == "order":
+        return f'"{p["first"]}" appears before "{p["then"]}".'
+    return f"{k} {json.dumps(p)}"
+
+
+def vote(brief: Brief, checks: list[Check], model: str) -> dict[str, float]:
+    """P(the brief asks for it) for each check, from one decision model."""
+    out: dict[str, float] = {}
+    step = llm.DECISION_MAX_QUESTIONS
+    for i in range(0, len(checks), step):
+        chunk = checks[i : i + step]
+        qs = {f"q{j}": {"type": "noul", "instructions": describe(c), "criteria": VOTE_CRITERIA}
+              for j, c in enumerate(chunk)}
+        r = llm.decide(model, VOTE_STATE.format(text=brief.text), qs)
+        for j, c in enumerate(chunk):
+            out[c.id] = round(float(r["answers"][f"q{j}"]["noul"]), 3)
+    return out
+
+
+def apply_votes(checks: list[Check], votes: dict[str, dict[str, float]], agree_min: int,
+                panel: int, vote_min: float = 0.5) -> None:
+    """Add each yes vote to the check's origin, then set severity from panel agreement."""
+    for c in checks:
+        for voter, p in votes.get(c.id, {}).items():
+            if p >= vote_min and voter not in c.origin:
+                c.origin.append(voter)
+    if panel > 1:
+        need = min(agree_min, panel)
+        for c in checks:
+            c.severity = "hard" if len(c.origin) >= need else "soft"
 
 
 # ------------------------------------------------------------------ panel merge
