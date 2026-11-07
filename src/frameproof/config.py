@@ -5,6 +5,7 @@ Model strings are "<provider>:<model>". Providers (see PROVIDERS below):
   openai     OpenAI, or any OpenAI-compatible endpoint via FP_OPENAI_BASE_URL
   google     Gemini, OpenAI-compatible endpoint     (GOOGLE_API_KEY or GEMINI_API_KEY)
   meta       Llama API, OpenAI-compatible endpoint  (LLAMA_API_KEY)
+  muse       Meta Model API (Muse Spark), OpenAI-compatible (MODEL_API_KEY)
   alibaba    Qwen on Alibaba Cloud Model Studio, OpenAI-compatible (ALIBABA_API_KEY or DASHSCOPE_API_KEY)
   subq       Subquadratic (SUBQ_API_KEY). Snap models are decision models
              (POST /systemone, probabilities, no text): judge or check voter only.
@@ -73,6 +74,9 @@ PROVIDERS: dict[str, Provider] = {
                        ("GOOGLE_API_KEY", "GEMINI_API_KEY"), "gemini"),
     "meta": Provider("meta", "https://api.llama.com/compat/v1/", ("LLAMA_API_KEY", "META_API_KEY"), "llama"),
     "subq": Provider("subq", "https://api.subq.ai/v1", ("SUBQ_API_KEY",), "subq"),
+    # Meta Model API (Muse Spark), OpenAI-compatible; a different service from the Llama API.
+    # Muse Spark reasons before answering, so small max_tokens budgets come back empty.
+    "muse": Provider("muse", "https://api.meta.ai/v1", ("MODEL_API_KEY", "MUSE_API_KEY"), "muse"),
     # Alibaba Cloud Model Studio, OpenAI-compatible. Default: the Coding Plan host, where sk-sp-
     # keys work (models seen 2026-11-07: qwen3.5/3.6/3.7-plus, kimi-k2.5, glm-5, MiniMax-M2.5).
     # Pay-as-you-go keys: FP_ALIBABA_BASE_URL=https://dashscope-intl.aliyuncs.com/compatible-mode/v1

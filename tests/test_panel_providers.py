@@ -86,3 +86,9 @@ def test_alibaba_provider(monkeypatch):
         llm.openai_client("alibaba")
     monkeypatch.setenv("DASHSCOPE_API_KEY", "x")
     assert PROVIDERS["alibaba"].key() == "x" and PROVIDERS["alibaba"].url().startswith("https://coding-intl.dashscope.aliyuncs.com")
+
+
+def test_muse_provider(monkeypatch):
+    assert llm.family("muse:muse-spark-1.3") == "muse" and not llm.is_decision("muse:muse-spark-1.3")
+    monkeypatch.setenv("MODEL_API_KEY", "x")
+    assert PROVIDERS["muse"].key() == "x" and PROVIDERS["muse"].url() == "https://api.meta.ai/v1"

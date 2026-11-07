@@ -40,7 +40,7 @@ def family(spec: str) -> str:
     provider, model = _split(spec)
     m = model.lower()
     for fam in ("claude", "gpt", "gemini", "qwen", "llama", "deepseek", "nemotron", "grok", "mistral", "subq",
-                "kimi", "glm", "minimax"):
+                "kimi", "glm", "minimax", "muse"):
         if fam in m:
             return fam
     if provider == "anthropic":
