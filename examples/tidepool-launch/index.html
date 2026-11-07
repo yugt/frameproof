@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <title>Tidepool launch</title>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      body { margin: 0; background: #0B1F3A; }
+      #root {
+        position: relative; width: 1920px; height: 1080px; overflow: hidden;
+        background: #0B1F3A; font-family: "Helvetica Neue", Arial, sans-serif; color: #FFFFFF;
+      }
+      .clip { position: absolute; inset: 0; }
+      #hook { display: grid; place-items: center; }
+      #headline { margin: 0; font-size: 120px; font-weight: 800; letter-spacing: -2px; }
+      #headline span { display: inline-block; margin: 0 14px; }
+      #feature-title {
+        position: absolute; left: 160px; top: 460px; margin: 0; width: 720px;
+        font-size: 84px; font-weight: 700; line-height: 1.05;
+      }
+      .card {
+        position: absolute; width: 220px; height: 150px; border-radius: 20px; background: #FF6B35;
+      }
+      #card-a { left: 1100px; top: 300px; }
+      #card-b { left: 1500px; top: 470px; }
+      #card-c { left: 1180px; top: 650px; }
+      #links { position: absolute; left: 0; top: 0; }
+      #links line { stroke: #FFFFFF; stroke-width: 6; stroke-linecap: round; }
+      #cta { display: grid; place-items: center; }
+      #cta-button {
+        padding: 40px 88px; border-radius: 999px; background: #FF6B35;
+        font-size: 72px; font-weight: 800; color: #FFFFFF;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="6"
+         data-width="1920" data-height="1080">
+      <section id="hook" class="clip" data-start="0" data-duration="2" data-track-index="1">
+        <h1 id="headline"><span id="w1">Notes</span><span id="w2">that</span><span id="w3">think</span></h1>
+      </section>
+
+      <section id="feature" class="clip" data-start="2" data-duration="2.5" data-track-index="1">
+        <h2 id="feature-title">Auto-link every idea</h2>
+        <svg id="links" width="1920" height="1080">
+          <line id="l1" x1="1210" y1="375" x2="1610" y2="545" />
+          <line id="l2" x1="1610" y1="545" x2="1290" y2="725" />
+        </svg>
+        <div id="card-a" class="card"></div>
+        <div id="card-b" class="card"></div>
+        <div id="card-c" class="card"></div>
+      </section>
+
+      <section id="cta" class="clip" data-start="4.5" data-duration="1.5" data-track-index="1">
+        <div id="cta-button">Try Tidepool free</div>
+      </section>
+    </div>
+
+    <script>
+      const tl = gsap.timeline({ paused: true });
+      // Hook: words rise in one by one.
+      tl.from("#headline span", { y: 120, opacity: 0, duration: 0.5, ease: "power3.out", stagger: 0.18 }, 0.1);
+      // Feature: title slides from the left, cards pop, links draw.
+      tl.from("#feature-title", { x: -200, opacity: 0, duration: 0.5, ease: "power3.out" }, 2.1);
+      tl.from(".card", { scale: 0.4, opacity: 0, duration: 0.4, ease: "back.out(2)", stagger: 0.15 }, 2.3);
+      tl.from("#links line", { opacity: 0, duration: 0.3, stagger: 0.2 }, 2.9);
+      // CTA: button pops in, then holds.
+      tl.from("#cta-button", { scale: 0.6, opacity: 0, duration: 0.4, ease: "back.out(2.2)" }, 4.6);
+      tl.set({}, {}, 6);
+      window.__timelines = window.__timelines || {};
+      window.__timelines.main = tl;
+    </script>
+  </body>
+</html>

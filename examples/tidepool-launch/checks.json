@@ -1,0 +1,21 @@
+[
+  {"id": "b1-text_visible", "kind": "text_visible", "params": {"text": "Notes that think", "at": 1.2}, "severity": "hard", "source": "0-2 s hook - the headline \"Notes that think\""},
+  {"id": "b2-text_color", "kind": "text_color", "params": {"text": "Notes that think", "at": 1.2, "color": "#FFFFFF"}, "severity": "hard", "source": "in white"},
+  {"id": "b3-bg_color", "kind": "bg_color", "params": {"at": 1.2, "color": "#0B1F3A", "min_fraction": 0.5}, "severity": "hard", "source": "deep navy #0B1F3A background"},
+  {"id": "b4-text_hidden", "kind": "text_hidden", "params": {"text": "Try Tidepool free", "at": 1.2}, "severity": "hard", "source": "4.5-6 s call to action"},
+  {"id": "b5-text_visible", "kind": "text_visible", "params": {"text": "Auto-link every idea", "at": 3.3}, "severity": "hard", "source": "2-4.5 s feature - \"Auto-link every idea\" slides in"},
+  {"id": "b6-text_region", "kind": "text_region", "params": {"text": "Auto-link every idea", "at": 3.3, "region": "left"}, "severity": "hard", "source": "on the left", "hidden": true},
+  {"id": "b7-text_visible", "kind": "text_visible", "params": {"text": "Try Tidepool free", "at": 5.4}, "severity": "hard", "source": "a coral button reading \"Try Tidepool free\""},
+  {"id": "b8-text_region", "kind": "text_region", "params": {"text": "Try Tidepool free", "at": 5.4, "region": "center"}, "severity": "hard", "source": "pops in at the centre"},
+  {"id": "b9-bg_color", "kind": "bg_color", "params": {"at": 5.4, "color": "#FF6B35", "min_fraction": 0.03}, "severity": "hard", "source": "a coral button", "hidden": true},
+  {"id": "b10-order", "kind": "order", "params": {"first": "Notes that think", "then": "Try Tidepool free"}, "severity": "hard", "source": "hook first, call to action last", "hidden": true},
+  {"id": "b11-motion", "kind": "motion", "params": {"t0": 0.1, "t1": 0.9, "min_change": 0.01}, "severity": "hard", "source": "rises into the centre ... word by word"},
+  {"id": "b12-still", "kind": "still", "params": {"t0": 5.5, "t1": 5.95, "max_change": 0.005}, "severity": "soft", "source": "holds still to the end", "hidden": true},
+  {"id": "b13-palette", "kind": "palette", "params": {"colors": ["#0B1F3A", "#FFFFFF", "#FF6B35"], "min_fraction": 0.85}, "severity": "soft", "source": "Palette"},
+  {"id": "g-renders", "kind": "renders", "params": {}, "severity": "hard", "source": "every composition must render"},
+  {"id": "g-no-overflow", "kind": "no_overflow", "params": {}, "severity": "hard", "source": "craft: no clipped text"},
+  {"id": "g-in-frame", "kind": "in_frame", "params": {"margin": 24}, "severity": "hard", "source": "craft: text inside the safe area"},
+  {"id": "g-no-overlap", "kind": "no_overlap", "params": {}, "severity": "soft", "source": "composition: text does not collide"},
+  {"id": "g-no-unexpected-text", "kind": "no_unexpected_text", "params": {}, "severity": "hard", "source": "prompt intent: only copy from the brief"},
+  {"id": "g-duration", "kind": "duration", "params": {"expected": 6.0, "tol": 0.9}, "severity": "hard", "source": "about 6 s"}
+]

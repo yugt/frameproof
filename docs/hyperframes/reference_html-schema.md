@@ -1,0 +1,339 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://hyperframes.heygen.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# HTML schema reference
+
+> The current contract for a HyperFrames composition.
+
+HyperFrames uses normal HTML and CSS for appearance. A small set of attributes
+declares the frame size, duration, clips, media, and nested compositions.
+
+For a gentler explanation, start with [Compositions](https://hyperframes.heygen.com/concepts/compositions.md) and
+[Data attributes](https://hyperframes.heygen.com/concepts/data-attributes.md).
+
+## Minimal composition
+
+```html theme={null}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      body { margin: 0; }
+      #root {
+        position: relative;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+      }
+      .clip {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="5"
+      data-width="1920"
+      data-height="1080"
+    >
+      <section
+        id="title-card"
+        class="clip"
+        data-start="0"
+        data-duration="5"
+        data-track-index="1"
+      >
+        <h1 id="title">Hello HyperFrames</h1>
+      </section>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const timeline = gsap.timeline({ paused: true });
+      timeline.fromTo(
+        "#title",
+        { y: 48, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.6, ease: "power3.out" },
+        0.2,
+      );
+      window.__timelines.main = timeline;
+    </script>
+  </body>
+</html>
+```
+
+The root is a real, explicitly sized box. Its `data-composition-id` matches the
+timeline registry key.
+
+## Composition root
+
+| Attribute | Required | Meaning |
+| - | - | - |
+| `data-composition-id` | Yes | Unique composition ID |
+| `data-start="0"` | Yes on the top-level root | Start of the composition |
+| `data-width` and `data-height` | Yes | Authored frame dimensions in pixels |
+| `data-duration` | Usually | Total render duration in seconds |
+| `data-no-timeline` | Only for a timeline-free composition | Tells the runtime not to wait for a timeline. Without it a composition that never registers one still waits out `player-ready-timeout` (45 s by default) on every render; `hyperframes lint` reports this as `missing_data_no_timeline` |
+
+An explicit root `data-duration` is the render length. The compiler reads it
+before composition scripts run, so a script or variable override cannot change
+that value for the same render.
+
+The root may omit `data-duration` only when HyperFrames can infer a finite
+duration from the registered animation runtime or timed media. Three.js,
+unbounded animation, and timeline-free compositions need an explicit duration.
+
+## Timed clips
+
+| Attribute | Required | Meaning |
+| - | - | - |
+| `id` | Yes | Stable identifier for timing, editing, and animation |
+| `data-start` | Yes | Start in seconds or a relative timing expression |
+| `data-duration` | Yes for DOM and nested-composition clips; optional for image (3 s default), video and audio (source length) | Visible slot length in seconds |
+| `data-track-index` | No | browser editor timeline lane, display only. The render never reads it and it does not prevent overlap |
+| `class="clip"` | Recommended for authored timed DOM and image elements | Layout and tooling convention. Visibility is keyed off `data-start`, but the shared `.clip` rule supplies the full-frame box |
+
+`data-track-index` does not control paint order. Use CSS `z-index` for
+front-to-back layering. Two clips on the same track may overlap in time; the
+lane is a browser editor display row, not a scheduling constraint.
+
+Negative `z-index` values are valid CSS, but an opaque ancestor background can
+cover the clip if its parent does not create a stacking context. Add
+`isolation: isolate` to that parent to keep the negative layer above the
+parent's background and below its foreground siblings. See the
+[before/after example](https://hyperframes.heygen.com/concepts/data-attributes.md#keep-negative-layers-inside-their-parent).
+The `negative_z_index` lint warning also fires on isolated layers because it
+checks CSS text rather than computed stacking contexts.
+
+Video visibility is managed as media and does not require `class="clip"`.
+Audio has no visual lifecycle.
+
+## Media
+
+```html theme={null}
+<video
+  id="demo"
+  src="./assets/demo.mp4"
+  data-start="0"
+  data-duration="8"
+  data-track-index="0"
+  muted
+  playsinline
+></video>
+```
+
+| Attribute | Applies to | Meaning |
+| - | - | - |
+| `data-media-start` / `data-playback-start` | Video, audio, nested composition | Offset into the source file, used by trim and split. Two groups of readers disagree, so the right name depends on the element. **Read only `data-media-start`:** the timing compiler, the HTML parser, `hyperframes validate` (which only inspects `<audio>`), and the engine's audio mixer (which feeds ffmpeg `-ss`). **Read `data-playback-start` first, falling back to `data-media-start`:** the runtime player, the browser editor (which also writes it), and `hyperframes snapshot`. Because the audio mixer reads only `data-media-start`, a `<video>` authored with just `data-playback-start` renders a trimmed picture over untrimmed audio. Set the name by kind: **`<video>` / `<audio>` → `data-media-start`**; **nested composition → `data-playback-start`** — composition hosts are inspected only by the playback-start-first readers (the media-start-only ones are all `<video>`/`<audio>`-scoped). `data-media-start` still works there as a fallback, but `data-playback-start` is the canonical name the browser editor writes and normalises to for new composition hosts, so the other name works until an edit rewrites it (it is the [child-timeline offset](https://hyperframes.heygen.com/concepts/compositions.md)). |
+| `data-playback-rate` | Video, audio, nested composition | Playback multiplier from `0.1` to `10`. A `rate` lane in `data-automation` overrides it; see [Speed ramps](https://hyperframes.heygen.com/reference/speed-ramps.md) |
+| `data-volume` | Video and audio | Static gain. `1` is 0 dB, `0` is silence, and values above `1` boost up to `3.98` (+12 dB). Multiplies any volume lane, and on a clip it applies ahead of the clip's audio effects |
+| `data-fade-in` / `data-fade-out` | Video and audio | Clip-edge fades in seconds: gain rises 0 → 1 over the first `data-fade-in` seconds and falls 1 → 0 over the last `data-fade-out` seconds of the clip. Linear, anchored to the clip's own edges (a fade-out follows a later trim), and multiplied on top of `data-volume` and any volume lane. Fades that together exceed the clip are scaled to meet inside it. The browser editor drags them from the dots at an audio clip's top corners or types them in the inspector's Fade rows |
+| `data-has-audio="true"` | Video | Declares that the video contributes audio |
+
+Video and audio may omit `data-duration` when their intrinsic duration is known
+and the whole remaining source should play.
+
+Do not imperatively call `play()`, `pause()`, or set `currentTime`.
+HyperFrames owns media playback and seeking. A `<video>` with sound declares `data-has-audio="true"` and is not muted. Silent footage is `muted`. Every timed `<video>` must say one or the other (lint `video_missing_muted`).
+
+Media can live inside nested composition markup. Keep element IDs unique across
+the assembled project because render-time frame injection targets those IDs.
+
+## Color grading and media effects
+
+The browser editor and the CLI store color correction, grading, finishing controls, LUTs,
+and media effects on an image or video with `data-color-grading`:
+
+```html theme={null}
+<video
+  id="demo"
+  src="./assets/demo.mp4"
+  data-color-grading='{
+    "preset": "clean-studio",
+    "intensity": 0.8,
+    "adjust": { "highlights": -0.08, "shadows": 0.06 },
+    "details": { "grain": 0.12, "vignette": 0.08 },
+    "effects": { "bloom": 0.12 },
+    "colorSpace": "rec709"
+  }'
+></video>
+```
+
+The current effect families include essentials, retro and glitch, print, and
+art treatments. Run
+`npx hyperframes media-treatment --capabilities --json` for the current
+machine-readable surface instead of hard-coding an old effect list.
+
+The grading pipeline applies to real `<img>` and `<video>` elements. It does
+not grade a complete HTML scene. Use the browser editor or
+[`media-treatment`](https://hyperframes.heygen.com/packages/cli#media-treatment) for normal authoring; see
+[Color Grading](https://hyperframes.heygen.com/guides/media-effects.md#fix-and-grade-the-color) and [Media Effects](https://hyperframes.heygen.com/guides/media-effects.md)
+for the workflow and current SDR/HDR boundary.
+
+## Relative timing
+
+A non-numeric `data-start` refers to the end of another clip in the same
+composition:
+
+```html theme={null}
+<video
+  id="intro"
+  data-start="0"
+  data-duration="4"
+  data-track-index="0"
+  src="./intro.mp4"
+  muted
+  playsinline
+></video>
+
+<section
+  id="result"
+  class="clip"
+  data-start="intro + 0.5"
+  data-duration="3"
+  data-track-index="0"
+>
+  Result
+</section>
+```
+
+Supported forms are `clip-id`, `clip-id + seconds`, and
+`clip-id - seconds`. References stay within one composition, must resolve to a
+known duration, and cannot form a cycle. Put intentional overlaps on different
+tracks.
+
+## Nested compositions
+
+The host declares a fixed timeline window:
+
+```html theme={null}
+<div
+  id="pricing-scene"
+  data-composition-id="pricing"
+  data-composition-src="./compositions/pricing.html"
+  data-start="4"
+  data-duration="6"
+  data-track-index="1"
+  data-width="1920"
+  data-height="1080"
+></div>
+```
+
+The host `data-composition-id` must match the ID inside the source file and its
+timeline registry key. The host `data-duration` controls how long the nested
+composition remains visible. A shorter inner timeline holds its final state;
+a shorter host duration cuts the slot.
+
+A nested composition file transports its live markup through `<template>`.
+Styles and scripts needed by that composition must be inside the template:
+
+```html theme={null}
+<template>
+  <style>
+    #root {
+      position: absolute;
+      inset: 0;
+    }
+  </style>
+
+  <div
+    id="root"
+    data-composition-id="pricing"
+    data-width="1920"
+    data-height="1080"
+  >
+    <!-- scene content -->
+  </div>
+
+  <script>
+    window.__timelines = window.__timelines || {};
+    const timeline = gsap.timeline({ paused: true });
+    // scene animation
+    window.__timelines.pricing = timeline;
+  </script>
+</template>
+```
+
+HyperFrames seeks nested timelines independently. Do not add a child timeline
+manually to the parent GSAP timeline.
+
+## Variables
+
+Declare the schema with `data-composition-variables`, then pass values through a
+render or a nested host:
+
+```html theme={null}
+<html
+  data-composition-variables='[
+    {"id":"title","type":"string","label":"Title","default":"Hello"}
+  ]'
+>
+```
+
+```html theme={null}
+<div
+  data-composition-id="pricing"
+  data-composition-src="./compositions/pricing.html"
+  data-variable-values='{"title":"Built for teams"}'
+  data-start="0"
+  data-duration="6"
+  data-track-index="1"
+  data-width="1920"
+  data-height="1080"
+></div>
+```
+
+Use `data-var-text`, `data-var-src`, or CSS `var(--variableId)` for direct
+bindings. Use `getVariables()` when the value affects logic.
+
+## Animation contract
+
+A composition using GSAP must:
+
+* create one finite timeline with `{ paused: true }`;
+* register it on `window.__timelines` after adding its tweens;
+* use the same key as `data-composition-id`;
+* avoid wall-clock state, unseeded randomness, and infinite repeats.
+
+HyperFrames controls seeking. Composition code describes how the visual state
+looks at a given time.
+
+Asynchronous setup, such as [loading a font before measuring text](https://hyperframes.heygen.com/guides/gsap-animation.md#load-fonts-before-measuring-text), is supported. Register the completed timeline at the end of the callback, after its tweens are added. Do not register an empty timeline before the asynchronous build finishes.
+
+Every element with `data-composition-id` participates in timeline readiness.
+For a static nested section, use an ordinary `id` instead, or add
+`data-no-timeline` to declare that no timeline will be registered. Otherwise,
+the renderer waits up to the player-ready timeout for that element's timeline.
+`hyperframes lint` reports bare composition hosts that have neither a matching
+timeline registration nor an explicit opt-out as `missing_data_no_timeline`.
+
+## Validate
+
+```bash theme={null}
+npx hyperframes lint
+npx hyperframes check
+```
+
+`lint` checks the static contract. `check` opens the project in a browser and
+checks runtime behavior, layout, motion, and contrast. Watch representative
+snapshots and the finished render as the final visual gate.
+
+
+## Related topics
+
+- [Compositions](https://hyperframes.heygen.com/concepts/compositions.md)
+- [Time elements with data attributes](https://hyperframes.heygen.com/concepts/data-attributes.md)
+- [Composition](https://hyperframes.heygen.com/sdk/reference/composition.md)
+
+
+This documentation is built and hosted on [Mintlify](https://mintlify.com), a developer documentation platform.

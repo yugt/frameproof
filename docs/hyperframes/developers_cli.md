@@ -1,0 +1,105 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://hyperframes.heygen.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# CLI guide
+
+> Find the HyperFrames command for creating, checking, rendering, publishing, and automating projects.
+
+Use this page to choose a command. The [CLI reference](https://hyperframes.heygen.com/packages/cli.md) contains
+detailed flags, examples, and environment settings. The installed version
+remains authoritative: run `npx hyperframes <command> --help`.
+
+## Everyday project loop
+
+| Task | Command |
+| - | - |
+| Create a project | `npx hyperframes init my-video` |
+| Open Studio | `npx hyperframes preview` |
+| Check HTML structure | `npx hyperframes lint` |
+| Run browser, layout, motion, and contrast checks | `npx hyperframes check` |
+| Capture review frames | `npx hyperframes snapshot --at 0,2,5` |
+| Render a video | `npx hyperframes render --output output.mp4` |
+| Publish a browser link | `npx hyperframes publish` |
+| Diagnose the machine | `npx hyperframes doctor` |
+| Free disk space HyperFrames used | `npx hyperframes clean` |
+
+## Work with media
+
+| Task | Command |
+| - | - |
+| Inspect project metadata | `npx hyperframes info` |
+| Measure sound timing | `npx hyperframes audio <file>` |
+| Transcribe speech | `npx hyperframes transcribe <file>` |
+| Generate narration | `npx hyperframes tts <script>` |
+| Capture a website | `npx hyperframes capture <url>` |
+
+To measure the end of a long recording as if it started at 4 seconds in the
+film, skip its first 30 minutes:
+
+```bash theme={null}
+npx hyperframes audio recording.wav --place-at 4 --skip-file-seconds 1800 --only moments
+```
+
+The result warns if the skipped audio held the recording's loudest moment.
+See [`audio` in the reference](https://hyperframes.heygen.com/packages/cli#audio) for the available measurements.
+
+## Reuse and inspect
+
+| Task | Command |
+| - | - |
+| Add a Catalog item | `npx hyperframes add <name>` |
+| List compositions | `npx hyperframes compositions` |
+| Print tracks and clips | `npx hyperframes timeline` (`--json` for agents) |
+| Inspect keyframe behavior | `npx hyperframes keyframes` |
+| Compare two or more versions | `npx hyperframes compare v1/ v2/` |
+
+`hyperframes timeline` also accepts agent editing verbs. Use `move`, `trim`, `split`, or `delete` with a row ref; add `--plan` to inspect the before/after rows and diff without writing, or `--json` for a machine-readable receipt. Time values accept seconds, relative offsets, frames, and anchors such as `after:#intro`.
+
+For scripts, `npx hyperframes keyframes --runtime css --json` writes one JSON
+result to stdout. Use `--runtime anime` for Anime.js. The static authoring
+notice appears only in human-readable output.
+
+## Rendering and automation
+
+The CLI also renders in batches and from variables, writes image sequences and
+several video formats, and runs in the cloud — managed, on AWS Lambda, or on
+Google Cloud Run. Most commands take `--json` when you need to read the result from a script.
+
+Browser installation and the media probes used by `snapshot` and
+`remove-background` preserve Unicode filenames and non-English text in
+subprocess diagnostics.
+
+Start with the simple command, then open the [full reference](https://hyperframes.heygen.com/packages/cli.md) for the exact options needed by automation or infrastructure.
+
+Before preview and render, HyperFrames stops headless Chrome processes left
+behind by crashed HyperFrames sessions. It only stops browsers that HyperFrames
+launched, so detached browsers from other tools keep running. To skip this
+cleanup, set `HYPERFRAMES_NO_ORPHAN_CLEANUP=1` in the calling environment:
+
+```bash theme={null}
+HYPERFRAMES_NO_ORPHAN_CLEANUP=1 npx hyperframes preview ./my-video
+```
+
+Cleanup remains enabled by default. Disabling it leaves browsers from crashed
+HyperFrames sessions running until you stop them yourself.
+
+> [!TIP]
+>
+> Run `npx hyperframes <command> --help` for the installed version’s exact syntax.
+
+## Related topics
+
+* [Open the complete CLI reference](https://hyperframes.heygen.com/packages/cli.md)
+* [Choose a rendering path](https://hyperframes.heygen.com/deploy/overview.md)
+* [Diagnose a CLI or project problem](https://hyperframes.heygen.com/help.md)
+
+
+## Related topics
+
+- [CLI](https://hyperframes.heygen.com/packages/cli.md)
+- [How HyperFrames fits into an application](https://hyperframes.heygen.com/developers/overview.md)
+- [Render from the command line](https://hyperframes.heygen.com/guides/rendering.md)
+
+
+This documentation is built and hosted on [Mintlify](https://mintlify.com), a developer documentation platform.
