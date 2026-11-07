@@ -43,6 +43,11 @@ document.getElementById('title').textContent = D.brief.id;
 const st = document.getElementById('status'); st.textContent = D.status;
 st.classList.add(D.status === 'DELIVERED' || D.status === 'ACCEPT' ? 'ACCEPT' : (D.status === 'REVISE' ? '' : 'BLOCK'));
 document.getElementById('brief').textContent = D.brief.text;
+if (D.panel && D.panel.label) {
+  const c = el('div', 'panel brief', 'Checks: ' + D.panel.label + (D.panel.why ? ' - ' + D.panel.why : '') + (D.panel.note ? ' ' + D.panel.note : ''));
+  if (D.panel.mode === 'generic') c.style.borderColor = 'var(--soft)';
+  c.style.marginTop = '10px'; document.getElementById('brief').after(c);
+}
 if (D.final_video) {
   const f = el('div', 'panel final'); f.append(el('div', 'muted', 'Delivered video' + (D.final_kind ? ' · ' + D.final_kind : '')));
   const v = document.createElement('video'); v.src = D.final_video; v.controls = true; v.muted = true; v.playsInline = true;
@@ -87,7 +92,16 @@ def write_studio_index(run_dir: Path, brief: dict, history: list[dict], status: 
     if (run_dir / "desk.json").exists():
         kind = {"hyperframes": "HyperFrames render", "stand-in": "stand-in (probe preview)"}.get(
             json.loads((run_dir / "desk.json").read_text()).get("kind", ""), "")
-    data = {"brief": brief, "history": hist, "status": status, "final_kind": kind,
+    panel = {}
+    if (run_dir / "panel.json").exists():
+        pj = json.loads((run_dir / "panel.json").read_text())
+        readers = pj.get("readers") or {}
+        label = {"panel": "checker panel: " + (", ".join(f"{m} ({h})" for m, h in readers.items()) or "?"),
+                 "fixture": "the example's hand-written checks (fixture; no checker produced checks)",
+                 "generic": "generic checks only"}.get(pj.get("mode"), pj.get("mode", ""))
+        panel = {"mode": pj.get("mode"), "label": label, "why": pj.get("why", ""),
+                 "note": pj.get("note", "") if pj.get("mode") == "generic" else ""}
+    data = {"brief": brief, "history": hist, "status": status, "final_kind": kind, "panel": panel,
             "final_video": os.path.relpath(final_video, run_dir) if final_video else None}
     out = run_dir / "index.html"
     out.write_text(_PAGE.replace("__DATA__", json.dumps(data).replace("</", "<\\/")))

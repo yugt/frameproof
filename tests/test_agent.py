@@ -90,3 +90,35 @@ def test_studio_end_to_end_replay(monkeypatch, tmp_path):
     # the proposer only ever saw public checks
     assert seen and all(not checks[f.split(":")[0]]["hidden"] for f in seen)
     assert (run_dir / "index.html").exists() and (run_dir / "final.mp4").exists()
+
+
+def test_intake_fails_early_without_a_proposer(monkeypatch):
+    monkeypatch.setattr(graph, "_implementer_ready", lambda: False)
+    with pytest.raises(RuntimeError, match="free-text brief.*examples/tidepool-launch"):
+        list(graph.intake("video a minion dancing"))
+    events = list(graph.intake("examples/tidepool-launch"))  # an example replays without a key
+    assert events[0].actions.state_delta["example_dir"].endswith("tidepool-launch")
+
+
+def _panel(node_input, brief_text, run_dir, example_dir=""):
+    async def go():
+        return [e async for e in graph.panel(node_input, {"id": "b", "text": brief_text, "duration": None},
+                                             str(run_dir), example_dir)]
+    return asyncio.run(go())[0]
+
+
+def test_panel_falls_back_to_generic_checks(tmp_path):
+    skipped = {f"reader_{i}": {"slot": i, "skipped": True} for i in (1, 2, 3)}
+    ev = _panel(skipped, "video a minion dancing", tmp_path)
+    checks = ev.actions.state_delta["checks"]
+    kinds = {c["kind"] for c in checks}
+    assert {"renders", "in_frame", "no_overflow", "no_unexpected_text", "motion"} <= kinds
+    assert not any(c["hidden"] for c in checks)
+    assert json.loads((tmp_path / "panel.json").read_text())["mode"] == "generic"
+    assert "No checker model is configured" in ev.content.parts[0].text
+
+
+def test_panel_explains_an_empty_snap_reader(tmp_path):
+    snap = {"slot": 0, "model": "subq:subq-snap-1.1", "how": "snap", "checks": [], "votes": {"candidates": []}}
+    ev = _panel({"reader_1": snap}, "video a minion dancing", tmp_path)
+    assert "had nothing to vote on" in ev.content.parts[0].text

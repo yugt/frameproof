@@ -77,6 +77,9 @@ def _parse_input(text: str) -> tuple[Brief, Path | None]:
 def intake(node_input: str):
     """Read the brief, open a run folder, reset the loop counters."""
     brief, example = _parse_input(node_input)
+    replayable = example is not None and (example / "index.html").exists()
+    if not replayable and not _implementer_ready():
+        raise RuntimeError(_no_proposer_message(brief))
     run_id = f"{time.strftime('%Y%m%d-%H%M%S')}-{brief.id}"
     run_dir = SETTINGS.runs_dir / "studio" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -88,6 +91,17 @@ def intake(node_input: str):
         "attempt": 0, "max_attempts": int(os.environ.get("FP_MAX_ATTEMPTS", "4")),
         "feedback": [], "history": [],
     }, message=f"Brief {brief.id!r}. Run folder: {run_dir}")
+
+
+def _no_proposer_message(brief: Brief) -> str:
+    spec = SETTINGS.implementer_model or "FP_IMPLEMENTER_MODEL"
+    provider = spec.partition(":")[0]
+    keys = ("ANTHROPIC_API_KEY",) if provider == "anthropic" else (
+        PROVIDERS[provider].key_envs if provider in PROVIDERS else ("its API key",))
+    return (f"Nobody can write this video yet. {brief.text[:60]!r} is a free-text brief, so a text model "
+            f"has to write the HTML, but the implementer {spec} has no key ({' or '.join(keys)}). "
+            f"Add that key to secrets.env, or set FP_IMPLEMENTER_MODEL to a google:/meta: model whose key "
+            f"you have. To see the loop without a key, send an example folder instead: examples/tidepool-launch")
 
 
 def _brief(d: dict) -> Brief:
@@ -183,12 +197,40 @@ async def panel(node_input: dict, brief: dict, run_dir: str, example_dir: str = 
         source = {"mode": "fixture", "file": str(Path(example_dir) / "checks.json"), "errors": errors,
                   "note": "no reader produced checks (no checker keys); using the example's hand-written checks"}
     else:
-        raise RuntimeError(f"no checks: configure FP_CHECKER_MODELS (reader errors: {errors})")
+        # Never ship ungated: with nothing brief-specific, gate on what every video must
+        # do, and say why the brief produced no checks so it can be fixed.
+        checks = compile_mod.generic_checks(b.duration) + [
+            Check("g-motion", "motion", {"t0": 0.1, "t1": 1.5, "min_change": 0.01}, "hard",
+                  "every motion graphic moves in its first 1.5 s")]
+        source = {"mode": "generic", "errors": errors, "why": _why_no_checks(outs),
+                  "snap_candidates": {o.model: o.votes for o in outs if o.votes},
+                  "note": "only generic checks (renders, text inside the frame, no clipped text, no text "
+                          "the brief never mentions, something moves). For brief-specific checks, put "
+                          "on-screen copy in quotes, colours as #hex and scene timings like 0-2 s in the brief."}
     compile_mod.save(checks, Path(run_dir) / "checks.json")
     (Path(run_dir) / "panel.json").write_text(json.dumps(source, indent=2))
     hidden = sum(c.hidden for c in checks)
     yield Event(state={"checks": [c.to_dict() for c in checks], "panel": source},
-                message=f"Panel ({source['mode']}): {len(checks)} checks, {hidden} hidden from the proposer.")
+                message=f"Panel ({source['mode']}): {len(checks)} checks, {hidden} hidden from the proposer."
+                        + (f" {source['why']} {source['note']}" if source["mode"] == "generic" else ""))
+
+
+def _why_no_checks(outs: list[ReaderOutput]) -> str:
+    ran = [o for o in outs if o.model]
+    if not ran:
+        return "No checker model is configured (FP_CHECKER_MODELS)."
+    parts = []
+    for o in ran:
+        if o.error:
+            parts.append(f"{o.model} failed: {o.error[:120]}")
+        elif o.how == "snap":
+            n = len((o.votes or {}).get("candidates", []))
+            parts.append(f"{o.model} had nothing to vote on: the brief has no quoted copy, #hex colours, "
+                         f"timings or layout words to build candidates from." if n == 0 else
+                         f"{o.model} rejected all {n} candidate checks.")
+        else:
+            parts.append(f"{o.model} proposed no usable checks.")
+    return " ".join(parts)
 
 
 # --------------------------------------------------------------------- proposer
