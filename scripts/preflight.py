@@ -75,9 +75,13 @@ def main() -> int:
     print("\nstudio")
 
     def graph():
-        from google.adk.cli.utils.agent_loader import AgentLoader
+        # The loader `adk web` uses (it lists a folder only if it has agent.py), not the plain one.
+        from google.adk.cli.utils._nested_agent_loader import NestedAgentLoader
 
-        wf = AgentLoader(str(ROOT / "apps")).load_agent("frameproof_studio")
+        loader = NestedAgentLoader(str(ROOT / "apps"))
+        if "frameproof_studio" not in loader.list_agents():
+            raise RuntimeError(f"adk web would list {loader.list_agents()} (needs apps/frameproof_studio/agent.py)")
+        wf = loader.load_agent("frameproof_studio")
         nodes = sorted({getattr(n, "name", "?") for e in wf.graph.edges for n in (e.from_node, e.to_node)}) if wf.graph else []
         return f"{type(wf).__name__}, {len(wf.graph.edges) if wf.graph else '?'} edges: {', '.join(nodes)}"
     probe("apps/frameproof_studio loads in ADK (adk web apps)", graph)
