@@ -112,3 +112,62 @@ call + 3 judge calls.
   every item of feedback the proposer saw came from a public check.
 
 Not yet run with live models: readers, proposer and judge all need keys.
+
+## Visual references
+
+Attach one image or video to the first message in `adk web` and include a text
+instruction such as “Use this image's style and animate a new title.” The default
+is **inspiration**: the proposer sees the image, or four timestamped frames from
+a video, and recreates the requested design. To use an image itself as an asset,
+attach it and send a JSON message such as:
+
+```json
+{"text":"Use the image as the background and animate the title Hello", "reference_mode":"asset"}
+```
+
+From the terminal:
+
+```bash
+python -m agent.run 'Animate this image' --reference ./image.jpg --reference-mode asset
+python -m agent.run 'Make a new ending in this style' --reference ./sample.mp4
+```
+
+References are limited to 50 MB; videos must be at most 10 minutes. Image asset
+mode copies the normalized image into each attempt as `reference.png`. Video is
+currently inspiration only: its four stills do not capture audio or all motion,
+and the probe does not seek embedded video. The run page displays the reference
+frames alongside attempt previews. Vision-capable text checkers and Snap voters
+receive the reference, but generic checks and the Snap candidate reader do not
+measure visual similarity. The verifier does not perform OCR on text baked into
+images; explicitly state desired copy in the brief. Models must support image
+input, and reference frames are sent to the configured providers.
+
+## Compact local studio
+
+```bash
+python -m agent.web
+```
+
+Open `http://127.0.0.1:8090/`. The studio plays the generated HTML directly in
+a sandboxed preview, with the prompt and reference controls beside it. It uses
+the same verifier and shows the result and run report; an attempt is labelled
+until the gate accepts it. In this interface, the desk delivers the HTML instead
+of rendering an MP4. For an MP4, use the existing terminal or ADK workflow.
+Set `FP_STUDIO_PORT` to choose another port. The local server has no login, so
+it binds to localhost. The HTML player follows the main GSAP timeline and clip
+timing; embedded video and nested compositions remain unsupported by the probe.
+
+After a preview appears in the compact studio, enter a change and select **Apply
+changes**. Each round sends the current HTML and accumulated user instructions
+to the proposer; later changes take precedence if they conflict. The updated
+composition is independently checked again, and the activity log keeps the
+rounds visible. **New project** clears the current composition. The current
+preview is held in the local server's memory; after a restart, use **Open previous
+run** to resume from a saved composition. When no text checker is available, revision runs may fall back to
+generic checks because the Snap candidate reader cannot resolve conflicting
+instructions; the run report labels that reduced coverage.
+
+Changes stay in the same studio session: `composition/index.html` is the stable
+working HTML, while `attempt-*/index.html` keeps each generated version. The
+session report and activity cover all rounds. A second concurrent edit or a
+stale preview is rejected; reopen the session to get its current version.

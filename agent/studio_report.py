@@ -31,6 +31,7 @@ li { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
 <header><span class="brand">frameproof studio</span><h1 id="title"></h1><span id="status" class="badge"></span></header>
 <main>
   <div class="panel brief" id="brief"></div>
+  <div id="reference"></div>
   <div id="final"></div>
   <h2 class="muted" style="font-size:15px;margin:22px 0 12px">Attempts: the proposer only ever sees public failures</h2>
   <div class="steps" id="steps"></div>
@@ -48,6 +49,16 @@ if (D.panel && D.panel.label) {
   if (D.panel.mode === 'generic') c.style.borderColor = 'var(--soft)';
   c.style.marginTop = '10px'; document.getElementById('brief').after(c);
 }
+if (D.reference_frames && D.reference_frames.length) {
+  const r = el('div', 'panel final'); r.append(el('div', 'muted', 'Reference · ' + D.reference_kind + ' · ' + D.reference_mode));
+  const row = el('div', 'row');
+  D.reference_frames.forEach((frame, i) => {
+    const item = el('div'); item.style.width = '200px';
+    const im = el('img'); im.src = frame; im.style.width = '100%'; item.append(im);
+    item.append(el('div', 'muted', D.reference_times[i] + ' s')); row.append(item);
+  });
+  r.append(row); document.getElementById('reference').append(r);
+}
 if (D.final_video) {
   const f = el('div', 'panel final'); f.append(el('div', 'muted', 'Delivered video' + (D.final_kind ? ' · ' + D.final_kind : '')));
   const v = document.createElement('video'); v.src = D.final_video; v.controls = true; v.muted = true; v.playsInline = true;
@@ -55,8 +66,8 @@ if (D.final_video) {
 }
 const steps = document.getElementById('steps');
 D.history.forEach((h, i) => {
-  if (i) steps.append(el('div', 'arrow', `↓ ${D.history[i - 1].public_feedback.length} public failures sent back` +
-    (D.history[i - 1].hidden_failures ? ` · ${D.history[i - 1].hidden_failures} hidden failures withheld` : '')));
+  if (i) steps.append(el('div', 'arrow', D.history[i - 1].decision === 'BLOCK' ? `↓ ${D.history[i - 1].public_feedback.length} public failures sent back` +
+    (D.history[i - 1].hidden_failures ? ` · ${D.history[i - 1].hidden_failures} hidden failures withheld` : '') : '↓ User revision'));
   const a = el('a', 'panel step'); a.href = h.report_rel;
   if (h.thumb) { const im = el('img'); im.src = h.thumb; a.append(im); } else a.append(el('div'));
   const b = el('div');
@@ -101,7 +112,11 @@ def write_studio_index(run_dir: Path, brief: dict, history: list[dict], status: 
                  "generic": "generic checks only"}.get(pj.get("mode"), pj.get("mode", ""))
         panel = {"mode": pj.get("mode"), "label": label, "why": pj.get("why", ""),
                  "note": pj.get("note", "") if pj.get("mode") == "generic" else ""}
-    data = {"brief": brief, "history": hist, "status": status, "final_kind": kind, "panel": panel,
+    ref_path = run_dir / "reference" / "reference.json"
+    ref = json.loads(ref_path.read_text()) if ref_path.exists() else {}
+    data = {"reference_frames": [os.path.relpath(p, run_dir) for p in ref.get("frames", [])],
+            "reference_kind": ref.get("kind"), "reference_mode": ref.get("mode"),
+            "reference_times": ref.get("times", []), "brief": brief, "history": hist, "status": status, "final_kind": kind, "panel": panel,
             "final_video": os.path.relpath(final_video, run_dir) if final_video else None}
     out = run_dir / "index.html"
     out.write_text(_PAGE.replace("__DATA__", json.dumps(data).replace("</", "<\\/")))

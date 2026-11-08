@@ -12,6 +12,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import mimetypes
+from pathlib import Path
 import sys
 
 from google.adk.runners import InMemoryRunner
@@ -34,10 +36,16 @@ def _print_event(e) -> None:
         print(f"[{node}] route -> {route}", flush=True)
 
 
-async def run(text: str) -> list:
+async def run(text: str, reference: Path | None = None, reference_mode: str = "inspiration") -> list:
     runner = InMemoryRunner(node=root_agent, app_name=APP)
     session = await runner.session_service.create_session(app_name=APP, user_id="studio")
-    msg = types.Content(role="user", parts=[types.Part(text=text)])
+    parts = [types.Part(text=text)]
+    if reference:
+        import json
+        mime = mimetypes.guess_type(reference.name)[0] or "application/octet-stream"
+        parts = [types.Part(text=json.dumps({"text": text, "reference_mode": reference_mode})),
+                 types.Part.from_bytes(data=reference.read_bytes(), mime_type=mime)]
+    msg = types.Content(role="user", parts=parts)
     events = []
     answered: set[str] = set()  # our own answers are not echoed back as events
     while True:
@@ -62,6 +70,8 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("brief", help="example folder, briefs.json#id, JSON brief, or brief text")
     ap.add_argument("--max-attempts", type=int)
     ap.add_argument("--replay", help="FP_REPLAY variants, e.g. shift_timing,typo,original")
+    ap.add_argument("--reference", type=Path, help="image or video reference")
+    ap.add_argument("--reference-mode", choices=["inspiration", "asset"], default="inspiration")
     ap.add_argument("--real-render", action="store_true", help="final render with HyperFrames (slow)")
     a = ap.parse_args(argv)
     if a.max_attempts:
@@ -70,7 +80,7 @@ def main(argv: list[str] | None = None) -> None:
         os.environ["FP_REPLAY"] = a.replay
     if a.real_render:
         os.environ["FP_REAL_RENDER"] = "1"
-    asyncio.run(run(a.brief))
+    asyncio.run(run(a.brief, a.reference, a.reference_mode))
 
 
 if __name__ == "__main__":

@@ -11,3 +11,4 @@ data/kaggle/
 .hyperframes/
 secrets.env
 .adk/
+demo/

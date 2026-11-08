@@ -37,7 +37,7 @@ class AttemptRecord(BaseModel):
 class DeskReceipt(BaseModel):
     """What the desk hands out when it pauses: the render job to wait for."""
     job_id: str
-    kind: Literal["hyperframes", "stand-in"]
+    kind: Literal["hyperframes", "stand-in", "html"]
     project_dir: str
     video: str
     pid: int | None = None

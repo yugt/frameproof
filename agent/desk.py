@@ -29,7 +29,10 @@ def real_render_enabled() -> bool:
 def start(run_dir: Path, attempt_dir: Path, job_id: str) -> DeskReceipt:
     run_dir, attempt_dir = Path(run_dir), Path(attempt_dir)
     final = run_dir / "final.mp4"
-    if real_render_enabled() and shutil.which("npx"):
+    if os.environ.get("FP_STUDIO_HTML_ONLY") == "1":
+        receipt = DeskReceipt(job_id=job_id, kind="html", project_dir=str(attempt_dir),
+                              video=str(attempt_dir / "index.html"))
+    elif real_render_enabled() and shutil.which("npx"):
         log = run_dir / "desk.log"
         with log.open("w") as fh:
             p = subprocess.Popen(
@@ -48,7 +51,7 @@ def start(run_dir: Path, attempt_dir: Path, job_id: str) -> DeskReceipt:
 
 def status(receipt: DeskReceipt) -> str:
     """running | done | failed"""
-    if receipt.kind == "stand-in":
+    if receipt.kind in {"stand-in", "html"}:
         return "done" if Path(receipt.video).exists() else "failed"
     if receipt.pid and _alive(receipt.pid):
         return "running"

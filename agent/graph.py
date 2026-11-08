@@ -25,8 +25,11 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
 import time
+import uuid
 from pathlib import Path
+from typing import Any
 
 from google.adk import Event, Workflow
 from google.adk.events import RequestInput
@@ -44,6 +47,7 @@ from frameproof.judge import judge
 from frameproof.probe import preview_mp4, probe
 from frameproof.verify import decide, times_needed, verify, write_report
 
+from . import reference as reference_mod
 from . import desk as desk_mod
 from .schemas import AttemptRecord, DeskAnswer, ReaderOutput
 from .studio_report import write_studio_index
@@ -74,22 +78,85 @@ def _parse_input(text: str) -> tuple[Brief, Path | None]:
     return Brief(id="brief-" + time.strftime("%H%M%S"), text=text), None
 
 
-def intake(node_input: str):
+def intake(node_input: Any):
     """Read the brief, open a run folder, reset the loop counters."""
+    from google.genai import types
+    attachment = None
+    if isinstance(node_input, types.Content):
+        text = "\n".join(p.text for p in (node_input.parts or []) if p.text)
+        media = [p for p in (node_input.parts or []) if p.inline_data or p.file_data]
+        if len(media) > 1:
+            raise ValueError("Attach one image or video per run")
+        if media:
+            if not media[0].inline_data:
+                raise ValueError("Reference must be uploaded inline, not as a remote file URI")
+            attachment = media[0].inline_data
+        node_input = text
+    if not isinstance(node_input, str) or not node_input.strip():
+        raise ValueError("Include text describing what to build with the reference")
+    mode = "inspiration"
+    revision = {}
+    if node_input.strip().startswith("{"):
+        try:
+            data = json.loads(node_input)
+            mode = data.get("reference_mode", mode)
+            revision = data.get("revision") or {}
+        except (ValueError, AttributeError):
+            pass
     brief, example = _parse_input(node_input)
+    base_html = None
+    if revision:
+        base_html = Path(revision.get("base_html", "")).resolve()
+        if not base_html.is_relative_to(SETTINGS.runs_dir.resolve()) or not base_html.is_file() or base_html.name != "index.html":
+            raise ValueError("Revision source must be an existing studio composition")
+        previous = revision.get("brief", "")
+        if not isinstance(previous, str) or not previous:
+            raise ValueError("Revision source has no previous brief")
+        brief = Brief(id=brief.id, text=(previous + "\n\nLatest user change (takes precedence over conflicting earlier instructions):\n" + brief.text))
     replayable = example is not None and (example / "index.html").exists()
     if not replayable and not _implementer_ready():
         raise RuntimeError(_no_proposer_message(brief))
-    run_id = f"{time.strftime('%Y%m%d-%H%M%S')}-{brief.id}"
-    run_dir = SETTINGS.runs_dir / "studio" / run_id
-    run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "brief.json").write_text(json.dumps({"id": brief.id, "text": brief.text}, indent=2))
+    history = []
+    round_start_attempt = 0
+    if revision:
+        run_dir = Path(revision.get("run_dir", "")).resolve()
+        studio_root = (SETTINGS.runs_dir / "studio").resolve()
+        if run_dir.parent != studio_root or not base_html.is_relative_to(run_dir):
+            raise ValueError("Revision source must belong to its studio session")
+        run_id = run_dir.name
+        attempt_dirs = [p for p in run_dir.glob("attempt-*") if p.is_dir() and p.name[8:].isdigit()]
+        round_start_attempt = max((int(p.name[8:]) for p in attempt_dirs), default=0)
+        history_file = run_dir / "history.json"
+        if history_file.is_file():
+            history = json.loads(history_file.read_text())
+        elif (run_dir / "summary.json").is_file():
+            old_summary = json.loads((run_dir / "summary.json").read_text())
+            if old_summary.get("final"):
+                history = [old_summary["final"]]
+        old_brief = json.loads((run_dir / "brief.json").read_text())
+        brief.id = old_brief.get("id", brief.id)
+    else:
+        run_id = f"{time.strftime('%Y%m%d-%H%M%S')}-{brief.id}-{uuid.uuid4().hex[:8]}"
+        run_dir = SETTINGS.runs_dir / "studio" / run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+    # Each uploaded reference has its own immutable snapshot, so a failed edit
+    # cannot change the reference used by the current composition.
+    ref_run = run_dir / "revisions" / uuid.uuid4().hex if revision and attachment else run_dir
+    reference = reference_mod.prepare(attachment.data, attachment.mime_type or "", ref_run, mode) if attachment else revision.get("reference")
+    if reference and not attachment:
+        for value in [*reference.get("frames", []), *([reference["asset"]] if reference.get("asset") else [])]:
+            path = Path(value).resolve()
+            if not path.is_relative_to(SETTINGS.runs_dir.resolve()) or not path.is_file():
+                raise ValueError("Revision reference must be an existing studio asset")
+    if not revision:
+        (run_dir / "brief.json").write_text(json.dumps({"id": brief.id, "text": brief.text}, indent=2))
     yield Event(state={
         "brief": {"id": brief.id, "text": brief.text, "duration": brief.duration},
-        "example_dir": str(example or ""),
+        "example_dir": str(example or ""), "reference": reference, "base_html": str(base_html or ""),
         "run_id": run_id, "run_dir": str(run_dir),
-        "attempt": 0, "max_attempts": int(os.environ.get("FP_MAX_ATTEMPTS", "4")),
-        "feedback": [], "history": [],
+        "attempt": round_start_attempt, "round_start_attempt": round_start_attempt,
+        "max_attempts": round_start_attempt + int(os.environ.get("FP_MAX_ATTEMPTS", "4")),
+        "feedback": [], "history": history,
     }, message=f"Brief {brief.id!r}. Run page (fills in as attempts finish): {page_url(run_dir)}")
 
 
@@ -131,34 +198,36 @@ def _reader_slots() -> list[tuple[str, str]]:
     return slots[:READER_SLOTS]
 
 
-async def _read(slot: int, brief: dict) -> dict:
+async def _read(slot: int, brief: dict, reference: dict | None = None, base_html: str = "") -> dict:
     slots = _reader_slots()
     if slot >= len(slots):
         return ReaderOutput(slot=slot, skipped=True).model_dump()
     m, how = slots[slot]
     try:
         if how == "snap":
+            if base_html:
+                return ReaderOutput(slot=slot, model=m, how=how, error="Snap candidate reader cannot resolve conflicting revision instructions").model_dump()
             from frameproof.candidates import snap_reader
 
             checks, report = await asyncio.to_thread(snap_reader, _brief(brief), m, SETTINGS.vote_min)
             return ReaderOutput(slot=slot, model=m, how=how, checks=[c.to_dict() for c in checks],
                                 votes=report).model_dump()
-        checks = await asyncio.to_thread(compile_mod.propose, _brief(brief), m)
+        checks = await asyncio.to_thread(compile_mod.propose, _brief(brief), m, reference)
         return ReaderOutput(slot=slot, model=m, how=how, checks=[c.to_dict() for c in checks]).model_dump()
     except Exception as e:  # one reader failing must not sink the panel
         return ReaderOutput(slot=slot, model=m, how=how, error=f"{type(e).__name__}: {e}").model_dump()
 
 
-async def reader_1(brief: dict):
-    return await _read(0, brief)
+async def reader_1(brief: dict, reference: dict | None = None, base_html: str = ""):
+    return await _read(0, brief, reference, base_html)
 
 
-async def reader_2(brief: dict):
-    return await _read(1, brief)
+async def reader_2(brief: dict, reference: dict | None = None, base_html: str = ""):
+    return await _read(1, brief, reference, base_html)
 
 
-async def reader_3(brief: dict):
-    return await _read(2, brief)
+async def reader_3(brief: dict, reference: dict | None = None, base_html: str = ""):
+    return await _read(2, brief, reference, base_html)
 
 
 join_readers = JoinNode(name="join_readers")
@@ -167,7 +236,8 @@ join_readers = JoinNode(name="join_readers")
 # ------------------------------------------------------------------------ panel
 
 
-async def panel(node_input: dict, brief: dict, run_dir: str, example_dir: str = ""):
+async def panel(node_input: dict, brief: dict, run_dir: str, example_dir: str = "",
+                reference: dict | None = None):
     """Merge the readers' checks (agreement -> hard), add the voters, hide a share."""
     outs = [ReaderOutput(**v) for v in node_input.values()]
     per_model = {o.model: [Check.from_dict(c) for c in o.checks] for o in outs if o.model and o.checks}
@@ -181,7 +251,7 @@ async def panel(node_input: dict, brief: dict, run_dir: str, example_dir: str = 
         voted = []
         for v in [m for m in _voter_models() if m not in per_model]:  # a Snap reader does not vote twice
             try:
-                for cid, p in (await asyncio.to_thread(compile_mod.vote, b, merged, v)).items():
+                for cid, p in (await asyncio.to_thread(compile_mod.vote, b, merged, v, reference)).items():
                     votes.setdefault(cid, {})[v] = p
                 voted.append(v)
             except Exception as e:
@@ -258,15 +328,20 @@ def _replay_html(example_dir: Path, step: int) -> tuple[str, str]:
     return found[name], name
 
 
-async def proposer(brief: dict, attempt: int, run_dir: str, feedback: list, example_dir: str = ""):
+async def proposer(brief: dict, attempt: int, run_dir: str, feedback: list, example_dir: str = "",
+                   reference: dict | None = None, base_html: str = "", round_start_attempt: int = 0):
     """Write the next composition. Sees the brief and PUBLIC feedback only."""
     n = attempt + 1
     attempt_dir = Path(run_dir) / f"attempt-{n}"
     attempt_dir.mkdir(parents=True, exist_ok=True)
     if _implementer_ready() and os.environ.get("FP_PROPOSER", "auto") != "replay":
         skills = os.environ.get("FP_SKILLS")
+        previous_attempt = Path(run_dir) / f"attempt-{attempt}" / "index.html"
+        source = (Path(base_html) if base_html and attempt == round_start_attempt else
+                  previous_attempt if attempt and previous_attempt.exists() else None)
         await asyncio.to_thread(generate, _brief(brief), attempt_dir,
-                                skills_dir=Path(skills) if skills else None, feedback=feedback or None)
+                                skills_dir=Path(skills) if skills else None, feedback=feedback or None,
+                                reference=reference, base_html=source)
         label = SETTINGS.implementer_model
     elif example_dir and (Path(example_dir) / "index.html").exists():
         html, variant = _replay_html(Path(example_dir), attempt)
@@ -274,8 +349,24 @@ async def proposer(brief: dict, attempt: int, run_dir: str, feedback: list, exam
         label = f"replay:{variant}"
     else:
         raise RuntimeError("no proposer: set FP_IMPLEMENTER_MODEL and its key, or pass an example folder")
+    # Publish a stable working composition while retaining each attempt unchanged.
+    current_dir = Path(run_dir) / "composition"
+    current_dir.mkdir(exist_ok=True)
+    temp_html = current_dir / "index.html.tmp"
+    shutil.copyfile(attempt_dir / "index.html", temp_html)
+    temp_html.replace(current_dir / "index.html")
+    asset = attempt_dir / "reference.png"
+    if asset.is_file():
+        shutil.copyfile(asset, current_dir / "reference.png")
+    elif (current_dir / "reference.png").exists():
+        (current_dir / "reference.png").unlink()
+    (Path(run_dir) / "brief.json").write_text(json.dumps({"id": brief["id"], "text": brief["text"]}, indent=2))
+    if reference:
+        ref_dir = Path(run_dir) / "reference"
+        ref_dir.mkdir(exist_ok=True)
+        (ref_dir / "reference.json").write_text(json.dumps(reference, indent=2))
     (attempt_dir / "proposer.json").write_text(json.dumps({"proposer": label, "feedback_seen": feedback}, indent=2))
-    yield Event(state={"attempt": n, "attempt_dir": str(attempt_dir), "html": str(attempt_dir / "index.html"),
+    yield Event(state={"attempt": n, "attempt_dir": str(attempt_dir), "html": str(current_dir / "index.html"),
                        "proposer_label": label},
                 message=f"Attempt {n} by {label}" + (f", after {len(feedback)} feedback items" if feedback else ""))
 
@@ -307,7 +398,10 @@ def _verify_attempt(brief: dict, attempt_dir: Path, checks: list[dict], prev_dir
             v.decision, v.score, v.reasons = decide(v.results, v.judge["mean"])
         except Exception as e:
             v.meta["judge_error"] = f"{type(e).__name__}: {e}"[:300]
-    v.meta["render"] = preview_mp4(attempt_dir / "index.html", attempt_dir / "video.mp4")
+    if os.environ.get("FP_STUDIO_HTML_ONLY") == "1":
+        v.meta["render"] = {"ok": True, "kind": "html-preview"}
+    else:
+        v.meta["render"] = preview_mp4(attempt_dir / "index.html", attempt_dir / "video.mp4")
     v.meta["variant"] = attempt_dir.name
     write_report(v, attempt_dir, compare_to=prev_dir, back_link="../index.html")
     return v
@@ -328,6 +422,7 @@ async def gate(brief: dict, attempt: int, attempt_dir: str, checks: list, histor
         judge=({"model": v.judge["model"], "scores": v.judge["scores"], "mean": round(v.judge["mean"], 3)}
                if v.judge else ({"error": v.meta["judge_error"]} if "judge_error" in v.meta else None)))
     history = history + [rec.model_dump()]
+    (Path(run_dir) / "history.json").write_text(json.dumps(history, indent=2))
     if v.decision == "ACCEPT":
         route = "ACCEPT"
     elif attempt < max_attempts:
@@ -352,12 +447,14 @@ async def gate(brief: dict, attempt: int, attempt_dir: str, checks: list, histor
 
 def desk(run_id: str, run_dir: str, attempt_dir: str):
     """Start the final render and pause until deliver.py answers the job id."""
-    receipt = desk_mod.start(Path(run_dir), Path(attempt_dir), job_id=f"desk-{run_id}")
+    receipt = desk_mod.start(Path(run_dir), Path(attempt_dir), job_id=f"desk-{run_id}-{Path(attempt_dir).name}")
     yield Event(state={"desk": receipt.model_dump()})
+    message = ("Accepted. HTML preview is ready." if receipt.kind == "html" else
+               f"Accepted. Final render started ({receipt.kind}). Answer this call when {receipt.video} "
+               'is ready with {"approved": true}, or {"approved": false} to stop.')
     yield RequestInput(
         interrupt_id=receipt.job_id,
-        message=(f"Accepted. Final render started ({receipt.kind}). Answer this call with "
-                 f'{{"approved": true}} when {receipt.video} is ready, or {{"approved": false}} to stop.'),
+        message=message,
         payload=receipt.model_dump(),
         response_schema=DeskAnswer.model_json_schema(),
     )
@@ -389,9 +486,9 @@ async def deliver(ctx, node_input, run_dir: str, brief: dict, history: list, des
     summary = {"status": status, "video": str(video) if video.exists() else None, "desk": desk,
                "attempts": len(history), "final": history[-1] if history else None}
     (Path(run_dir) / "summary.json").write_text(json.dumps(summary, indent=2))
-    write_studio_index(Path(run_dir), brief, history, status=status, final_video=video if ok else None)
+    write_studio_index(Path(run_dir), brief, history, status=status, final_video=video if ok and desk.get("kind") != "html" else None)
     saved = ""
-    if ok:  # adk web lists session artifacts in its Artifacts tab, so the video plays there too
+    if ok and desk.get("kind") != "html":  # adk web lists session artifacts in its Artifacts tab, so the video plays there too
         try:
             from google.genai import types
 
