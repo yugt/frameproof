@@ -5,7 +5,9 @@ description = "An independent verifier for AI-written code-to-video (HyperFrames
 requires-python = ">=3.11"
 dependencies = [
   "anthropic>=0.70",
+  "certifi>=2025.0",
   "openai>=1.50",
+  "pymongo>=4.10",
   "playwright>=1.48",
   "numpy>=1.26",
   "pillow>=10.4",

@@ -47,8 +47,9 @@ def test_decide_request_shape(monkeypatch):
         def read(self):
             return json.dumps({"answers": {"q": {"type": "noul", "noul": 0.9}}, "usage": {"input_tokens": 5}}).encode()
 
-    def fake_urlopen(req, timeout):
+    def fake_urlopen(req, timeout, context):
         seen["url"], seen["body"], seen["auth"] = req.full_url, json.loads(req.data), req.get_header("Authorization")
+        assert context is not None
         return Resp()
 
     monkeypatch.setenv("SUBQ_API_KEY", "k")

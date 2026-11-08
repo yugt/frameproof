@@ -9,6 +9,9 @@
   frameproof verify   BRIEFS.json --id ID index.html --checks checks.json [--judge] [--lint]
   frameproof bench    examples/                                  planted-defect benchmark
   frameproof generate BRIEFS.json --id ID [--out runs/gen/ID]    implementer writes index.html
+  frameproof improve  BRIEFS.json --id ID --checks checks.json   MongoDB RAG generate/verify/repair
+  frameproof remember --brief-id ID --requirement TEXT --failure TEXT --fix TEXT
+                                                                 save explicit user feedback to RAG
 """
 
 from __future__ import annotations
@@ -156,6 +159,42 @@ def cmd_generate(a) -> None:
     print(path)
 
 
+def cmd_improve(a) -> None:
+    from .improve import run
+
+    _warn_independence()
+    b = _pick(a.briefs, a.id)
+    checks = compile_mod.load(Path(a.checks))
+    out = Path(a.out or SETTINGS.runs_dir / "improve" / b.id)
+    result = run(b, checks, out, max_attempts=a.max_attempts, use_judge=a.judge,
+                 model=a.model, skills_dir=Path(a.skills) if a.skills else None)
+    print(f"\nRAG retrieval evidence (minimum similarity 0.70):")
+    if result.retrieved:
+        for hit in result.retrieved:
+            preview = " ".join(hit.content.split())
+            if len(preview) > 160:
+                preview = preview[:157] + "..."
+            source = f"; brief={hit.brief_id}" if hit.brief_id else ""
+            print(f"- {hit.type}; similarity={hit.score:.3f}{source}: {preview}")
+    else:
+        print("- no historical memory met the similarity threshold")
+    print((out / f"attempt-{result.attempts}" / "verdict.md").read_text())
+    print(f"attempts: {result.attempts}; html: {result.html}; summary: {out / 'improve.json'}")
+    sys.exit(0 if result.decision == "ACCEPT" else 1)
+
+
+def cmd_remember(a) -> None:
+    from .memory import MemoryStore
+
+    memory = MemoryStore()
+    memory.ping()
+    feedback_id = memory.remember_user_feedback(
+        a.brief_id, a.requirement, a.failure, a.fix,
+    )
+    print(f"Saved user feedback {feedback_id} as brief_requirement, verification_failure, and successful_fix.")
+    print("The next semantically similar brief can retrieve this guidance with `frameproof improve`.")
+
+
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(prog="frameproof")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -190,6 +229,18 @@ def main(argv: list[str] | None = None) -> None:
 
     s = sub.add_parser("generate"); s.add_argument("briefs"); s.add_argument("--id"); s.add_argument("--out")
     s.add_argument("--skills"); s.set_defaults(fn=cmd_generate)
+
+    s = sub.add_parser("improve"); s.add_argument("briefs"); s.add_argument("--id")
+    s.add_argument("--checks", required=True); s.add_argument("--out")
+    s.add_argument("--max-attempts", type=int, default=2); s.add_argument("--judge", action="store_true")
+    s.add_argument("--model"); s.add_argument("--skills"); s.set_defaults(fn=cmd_improve)
+
+    s = sub.add_parser("remember")
+    s.add_argument("--brief-id", required=True)
+    s.add_argument("--requirement", required=True)
+    s.add_argument("--failure", required=True)
+    s.add_argument("--fix", required=True)
+    s.set_defaults(fn=cmd_remember)
 
     a = p.parse_args(argv)
     a.fn(a)

@@ -143,8 +143,37 @@ frameproof vote examples/tidepool-launch/brief.json --checks examples/tidepool-l
   --voters subq:subq-snap-1.1             # decision model scores each check against the brief
 FP_JUDGE_MODEL=subq:subq-snap-1.1 frameproof bench examples --judge --video none
 frameproof generate briefs.json --id <brief-id>
+frameproof improve examples/tidepool-launch/brief.json \
+  --checks examples/tidepool-launch/checks.json --max-attempts 2
 python -m pytest -q
 ```
+
+### MongoDB RAG improvement loop
+
+`frameproof improve` retrieves related requirements, failures, and successful fixes from
+MongoDB Atlas before generation. It then generates, verifies, records public failure
+evidence, retrieves repair guidance, and retries. Deterministic checks remain the only
+source of the final verdict; hidden-check details are never added to implementer memory.
+
+The expected Atlas resources are:
+
+- database `frameproof`, collection `verification_memory`;
+- Vector Search index `frameproof_memory`;
+- automated text embedding on `content` (the demo uses `voyage-4`);
+- filter fields `type` and `brief_id`.
+
+Configure the connection only in `secrets.env` (gitignored):
+
+```bash
+FP_MONGODB_URI=mongodb+srv://<user>:<password>@<cluster>/?retryWrites=true&w=majority
+FP_MONGODB_DB=frameproof
+FP_MONGODB_COLLECTION=verification_memory
+FP_MONGODB_VECTOR_INDEX=frameproof_memory
+```
+
+The loop writes `runs/improve/<brief-id>/attempt-N/` and a machine-readable
+`improve.json` summary. Atlas Automated Embedding is usage-based, so monitor its Usage
+and Rate Limits pages during the hackathon.
 
 ## Layout
 

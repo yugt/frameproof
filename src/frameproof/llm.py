@@ -164,9 +164,12 @@ def decide(spec: str, state: str, questions: dict[str, dict], images: list[bytes
     Each answer has `type` plus `noul` (P(yes)), or `choice`/`probabilities`/`confidence`,
     or `score` (probability-weighted level index, 0-based)/`legend`/`probabilities`/`confidence`.
     """
+    import ssl
     import time
     import urllib.error
     import urllib.request
+
+    import certifi
 
     provider, model = _split(spec)
     if provider not in PROVIDERS:
@@ -186,10 +189,11 @@ def decide(spec: str, state: str, questions: dict[str, dict], images: list[bytes
     url = (prov.url() or "").rstrip("/") + "/systemone"
     data = json.dumps(body).encode()
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    tls_context = ssl.create_default_context(cafile=certifi.where())
     for attempt in range(retries + 1):
         req = urllib.request.Request(url, data=data, headers=headers, method="POST")
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as r:
+            with urllib.request.urlopen(req, timeout=timeout, context=tls_context) as r:
                 return json.loads(r.read())
         except urllib.error.HTTPError as e:
             if e.code in (429, 503) and attempt < retries:

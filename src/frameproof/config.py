@@ -124,6 +124,12 @@ class Settings:
 
     runs_dir: Path = field(default_factory=lambda: Path(_env("FP_RUNS", str(ROOT / "runs"))))
 
+    # MongoDB Atlas Vector Search memory. The URI is required only by `frameproof improve`.
+    mongodb_uri: str = field(default_factory=lambda: _env("FP_MONGODB_URI", ""))
+    mongodb_db: str = field(default_factory=lambda: _env("FP_MONGODB_DB", "frameproof"))
+    mongodb_collection: str = field(default_factory=lambda: _env("FP_MONGODB_COLLECTION", "verification_memory"))
+    mongodb_vector_index: str = field(default_factory=lambda: _env("FP_MONGODB_VECTOR_INDEX", "frameproof_memory"))
+
     @property
     def checker_model(self) -> str:
         return self.checker_models[0] if self.checker_models else ""

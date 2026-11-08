@@ -34,6 +34,22 @@ class Verdict:
         """What the implementer may see: failures of non-hidden checks only."""
         return [f"{r.id}: {r.detail}" for r in self.results if not r.passed and not r.hidden]
 
+    def public_reasons(self) -> list[str]:
+        """Sanitized decision reasons that reveal no hidden check IDs or details."""
+        public_hard = [
+            f"public hard check failed: {r.id} ({r.detail})"
+            for r in self.results
+            if not r.passed and not r.hidden and r.severity == "hard"
+        ]
+        reasons = list(public_hard)
+        if self.score < SETTINGS.accept_threshold:
+            reasons.append(f"public verification score was below the acceptance threshold")
+        if self.decision == "BLOCK" and not public_hard and any(
+            not r.passed and r.hidden for r in self.results
+        ):
+            reasons.append("verification blocked by a withheld check; no hidden details are available")
+        return reasons
+
     def to_dict(self) -> dict:
         return asdict(self)
 
